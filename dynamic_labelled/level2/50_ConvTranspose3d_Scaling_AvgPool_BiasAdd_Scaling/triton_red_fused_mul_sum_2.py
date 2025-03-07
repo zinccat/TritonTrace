@@ -1,0 +1,79 @@
+# From: 50_ConvTranspose3d_Scaling_AvgPool_BiasAdd_Scaling
+
+import triton
+import triton.language as tl
+
+from torch._inductor.runtime import triton_helpers
+triton_helpers.set_driver_to_gpu()
+
+@triton.jit
+def triton_red_fused_mul_sum_2red_fused_mul_sum_2(
+    input_ptr0, input_ptr1, output_ptr0, kernel_size0, kernel_size1, kernel_size2, 
+    x_num_elements, r_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
+):
+    x_num_elements = 368
+    x_offset = tl.program_id(0) * XBLOCK
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
+    x_mask = x_indices < x_num_elements
+    r_base = tl.arange(0, RBLOCK)[None, :]
+    x_div_16 = x_indices // 16
+    x_mod_16 = x_indices % 16
+    tmp4 = tl.load(input_ptr1 + (0))
+    tmp5 = tl.broadcast_to(tmp4, [XBLOCK, RBLOCK])
+    _tmp10 = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    x3 = x_indices
+
+    for r_offset in range(0, r_num_elements, RBLOCK):
+        r_indices = r_offset + r_base
+        r_mask = r_indices < r_num_elements
+        r2 = r_indices
+        divisor = triton_helpers.div_floor_integer(
+            22 + ((-1) * kernel_size0) + kernel_size0 * kernel_size1 + 
+            ((-1) * kernel_size0 * kernel_size2 * kernel_size2) + 
+            2 * kernel_size0 * kernel_size2 + 
+            kernel_size0 * kernel_size1 * kernel_size2 * kernel_size2 + 
+            ((-2) * kernel_size0 * kernel_size1 * kernel_size2), 
+            23
+        )
+        tmp0 = r2 + x_div_16 * divisor
+        tmp1 = ((-1) * kernel_size0) + kernel_size0 * kernel_size1 + 
+               ((-1) * kernel_size0 * kernel_size2 * kernel_size2) + 
+               2 * kernel_size0 * kernel_size2 + 
+               kernel_size0 * kernel_size1 * kernel_size2 * kernel_size2 + 
+               ((-2) * kernel_size0 * kernel_size1 * kernel_size2)
+        tmp2 = tmp0 < tmp1
+
+        tmp3 = tl.load(
+            input_ptr0 + (
+                ((-1) * x_mod_16) + 
+                ((-1) * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size2)) % ((-1) + kernel_size2))) + 
+                ((-16) * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size1 + ((-1) * kernel_size2 * kernel_size2) + 2 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-2) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                kernel_size1 * x_mod_16 + 
+                kernel_size2 * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size2)) % ((-1) + kernel_size2)) + 
+                kernel_size2 * kernel_size2 * (((r2 + x_div_16 * divisor) // (1 + kernel_size2 * kernel_size2 + ((-2) * kernel_size2))) % ((-1) + kernel_size1)) + 
+                ((-1) * x_mod_16 * kernel_size2 * kernel_size2) + 
+                ((-16) * kernel_size2 * kernel_size2 * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size1 + ((-1) * kernel_size2 * kernel_size2) + 2 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-2) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                ((-2) * kernel_size2 * (((r2 + x_div_16 * divisor) // (1 + kernel_size2 * kernel_size2 + ((-2) * kernel_size2))) % ((-1) + kernel_size1))) + 
+                2 * kernel_size2 * x_mod_16 + 
+                16 * kernel_size1 * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size1 + ((-1) * kernel_size2 * kernel_size2) + 2 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-2) * kernel_size1 * kernel_size2))) % kernel_size0) + 
+                32 * kernel_size2 * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size1 + ((-1) * kernel_size2 * kernel_size2) + 2 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-2) * kernel_size1 * kernel_size2))) % kernel_size0) + 
+                kernel_size1 * x_mod_16 * kernel_size2 * kernel_size2 + 
+                ((-32) * kernel_size1 * kernel_size2 * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size1 + ((-1) * kernel_size2 * kernel_size2) + 2 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-2) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                ((-2) * kernel_size1 * kernel_size2 * x_mod_16) + 
+                16 * kernel_size1 * kernel_size2 * kernel_size2 * (((r2 + x_div_16 * divisor) // ((-1) + kernel_size1 + ((-1) * kernel_size2 * kernel_size2) + 2 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-2) * kernel_size1 * kernel_size2))) % kernel_size0) + 
+                (((r2 + x_div_16 * divisor) % ((-1) + kernel_size2))) + 
+                (((r2 + x_div_16 * divisor) // (1 + kernel_size2 * kernel_size2 + ((-2) * kernel_size2))) % ((-1) + kernel_size1))
+            ), 
+            r_mask & tmp2 & x_mask, 
+            eviction_policy='evict_last', 
+            other=0.0
+        )
+        tmp6 = tmp3 * tmp5
+        tmp7 = tl.full(tmp6.shape, 0, tmp6.dtype)
+        tmp8 = tl.where(tmp2, tmp6, tmp7)
+        tmp9 = tl.broadcast_to(tmp8, [XBLOCK, RBLOCK])
+        tmp11 = _tmp10 + tmp9
+        _tmp10 = tl.where(r_mask & x_mask, tmp11, _tmp10)
+
+    tmp10 = tl.sum(_tmp10, 1)[:, None]
+    tl.store(output_ptr0 + (x3), tmp10, x_mask)

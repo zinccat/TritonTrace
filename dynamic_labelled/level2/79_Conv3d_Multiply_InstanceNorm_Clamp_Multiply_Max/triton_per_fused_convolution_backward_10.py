@@ -1,0 +1,32 @@
+# From: 79_Conv3d_Multiply_InstanceNorm_Clamp_Multiply_Max
+
+import triton
+import triton.language as tl
+
+from torch._inductor.runtime import triton_helpers
+triton_helpers.set_driver_to_gpu()
+
+@triton.jit
+def triton_per_fused_convolution_backward_10per_fused_convolution_backward_10(
+    input_ptr, output_ptr, input_num_elements, result_num_elements, INPUT_BLOCK: tl.constexpr
+):
+    input_num_elements = 16
+    result_num_elements = 21
+    RESULT_BLOCK: tl.constexpr = 32
+
+    input_offset = tl.program_id(0) * INPUT_BLOCK
+    input_indices = input_offset + tl.arange(0, INPUT_BLOCK)[:, None]
+    input_mask = input_indices < input_num_elements
+
+    result_indices = tl.arange(0, RESULT_BLOCK)[None, :]
+    result_mask = result_indices < result_num_elements
+
+    result_index = result_indices
+    input_index = input_indices
+
+    temp_input = tl.load(input_ptr + (input_index + 16 * result_index), result_mask & input_mask, other=0.0)
+    temp_broadcast = tl.broadcast_to(temp_input, [INPUT_BLOCK, RESULT_BLOCK])
+    temp_filtered = tl.where(result_mask & input_mask, temp_broadcast, 0)
+    temp_summed = tl.sum(temp_filtered, 1)[:, None]
+
+    tl.store(output_ptr + (input_index), temp_summed, input_mask)

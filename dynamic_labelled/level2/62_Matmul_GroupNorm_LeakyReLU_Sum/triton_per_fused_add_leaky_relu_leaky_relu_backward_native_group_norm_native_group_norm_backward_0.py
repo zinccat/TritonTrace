@@ -17,57 +17,58 @@ def triton_per_fused_add_leaky_relu_leaky_relu_backward_native_group_norm_native
     xmask = xindex < xnumel
     rindex = tl.arange(0, RBLOCK)[None, :]
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
-    r_block_index = rindex
-    x_block_index = xindex
-    x_mod_index = xindex % 8
+    row_index = rindex
+    col_index = xindex
+    col_mod8 = xindex % 8
 
-    grad_input = tl.load(input_grad_ptr + (r_block_index + 32 * x_block_index), xmask, other=0.0)
-    input1 = tl.load(input_ptr1 + (x_block_index), xmask)
-    input2 = tl.load(input_ptr2 + (x_block_index), xmask)
-    grad_input2 = tl.load(input_ptr3 + (r_block_index + 32 * x_mod_index), xmask, eviction_policy='evict_last', other=0.0)
-    input3 = tl.load(input_ptr4 + (r_block_index + 32 * x_mod_index), xmask, eviction_policy='evict_last', other=0.0)
-    grad_input3 = tl.load(input_ptr5 + (r_block_index + 32 * x_block_index), xmask, other=0.0)
-    input2_evict = tl.load(input_ptr2 + (x_block_index), xmask, eviction_policy='evict_last')
-    input1_evict = tl.load(input_ptr1 + (x_block_index), xmask, eviction_policy='evict_last')
+    grad_input = tl.load(input_grad_ptr + (row_index + 32 * col_index), xmask, other=0.0)
+    input1 = tl.load(input_ptr1 + (col_index), xmask)
+    input2 = tl.load(input_ptr2 + (col_index), xmask)
+    grad_weight = tl.load(input_ptr3 + (row_index + 32 * col_mod8), xmask, eviction_policy='evict_last', other=0.0)
+    weight = tl.load(input_ptr4 + (row_index + 32 * col_mod8), xmask, eviction_policy='evict_last', other=0.0)
+    grad_input2 = tl.load(input_ptr5 + (row_index + 32 * col_index), xmask, other=0.0)
+    input2_evict = tl.load(input_ptr2 + (col_index), xmask, eviction_policy='evict_last')
+    input1_evict = tl.load(input_ptr1 + (col_index), xmask, eviction_policy='evict_last')
 
     diff = grad_input - input1
     scaled_diff = diff * input2
-    scaled_diff_grad = scaled_diff * grad_input2
-    combined_grad = scaled_diff_grad + input3
+    scaled_weighted_diff = scaled_diff * weight
+    combined_grad = scaled_weighted_diff + weight
 
     zero = 0.0
     positive_mask = combined_grad > zero
-    doubled_grad = grad_input3 + grad_input3
+    doubled_grad_input2 = grad_input2 + grad_input2
     leaky_relu_slope = 0.01
-    leaky_grad = doubled_grad * leaky_relu_slope
-    leaky_combined_grad = tl.where(positive_mask, doubled_grad, leaky_grad)
+    leaky_grad = doubled_grad_input2 * leaky_relu_slope
+    leaky_combined_grad = tl.where(positive_mask, doubled_grad_input2, leaky_grad)
     scaled_leaky_grad = leaky_combined_grad * grad_input
-    scaled_leaky_grad_input2 = scaled_leaky_grad * grad_input2
-    broadcasted_grad = tl.broadcast_to(scaled_leaky_grad_input2, [XBLOCK, RBLOCK])
-    masked_broadcasted_grad = tl.where(xmask, broadcasted_grad, 0)
-    sum_masked_broadcasted_grad = tl.sum(masked_broadcasted_grad, 1)[:, None]
+    weighted_leaky_grad = scaled_leaky_grad * weight
+    broadcasted_weighted_leaky_grad = tl.broadcast_to(weighted_leaky_grad, [XBLOCK, RBLOCK])
+    masked_broadcasted_weighted_leaky_grad = tl.where(xmask, broadcasted_weighted_leaky_grad, 0)
+    sum_masked_broadcasted_weighted_leaky_grad = tl.sum(masked_broadcasted_weighted_leaky_grad, 1)[:, None]
 
-    scaled_leaky_grad_input2_broadcast = tl.broadcast_to(scaled_leaky_grad_input2, [XBLOCK, RBLOCK])
-    masked_scaled_leaky_grad_input2 = tl.where(xmask, scaled_leaky_grad_input2_broadcast, 0)
-    sum_masked_scaled_leaky_grad_input2 = tl.sum(masked_scaled_leaky_grad_input2, 1)[:, None]
+    scaled_leaky_weight = leaky_combined_grad * weight
+    broadcasted_scaled_leaky_weight = tl.broadcast_to(scaled_leaky_weight, [XBLOCK, RBLOCK])
+    masked_broadcasted_scaled_leaky_weight = tl.where(xmask, broadcasted_scaled_leaky_weight, 0)
+    sum_masked_broadcasted_scaled_leaky_weight = tl.sum(masked_broadcasted_scaled_leaky_weight, 1)[:, None]
 
-    input2_scaled_grad_input2 = input2_evict * grad_input2
-    combined_leaky_grad_input2 = leaky_combined_grad * input2_scaled_grad_input2
-    diff_sum_input1 = sum_masked_scaled_leaky_grad_input2 * input1_evict
-    diff_sum_input1_sub = diff_sum_input1 - sum_masked_broadcasted_grad
-    diff_sum_input2 = diff_sum_input1_sub * input2_evict
-    cubed_input2 = diff_sum_input2 * diff_sum_input2 * diff_sum_input2
+    scaled_input2_weight = input2_evict * weight
+    scaled_leaky_input2_weight = leaky_combined_grad * scaled_input2_weight
+    diff_input1_evict = sum_masked_broadcasted_scaled_leaky_weight * input1_evict
+    diff_grad_input = diff_input1_evict - sum_masked_broadcasted_weighted_leaky_grad
+    scaled_diff_input2 = diff_grad_input * input2_evict
+    cubed_input2 = scaled_diff_input2 * input2_evict * input2_evict * input2_evict
     scaling_factor = 0.03125
     scaled_cubed_input2 = cubed_input2 * scaling_factor
-    scaled_grad_input = grad_input * scaled_cubed_input2
-    combined_scaled_grad_input = combined_leaky_grad_input2 + scaled_grad_input
+    scaled_grad_input_scaled_cubed_input2 = grad_input * scaled_cubed_input2
+    combined_scaled_input2 = scaled_leaky_input2_weight + scaled_grad_input_scaled_cubed_input2
 
     neg_scaled_cubed_input2 = -scaled_cubed_input2
-    neg_scaled_input1 = neg_scaled_cubed_input2 * input1_evict
-    scaled_diff_input2 = sum_masked_scaled_leaky_grad_input2 * input2_evict
-    scaled_diff_input2_scaled = scaled_diff_input2 * scaling_factor
-    combined_neg_scaled_input1 = neg_scaled_input1 - scaled_diff_input2_scaled
-    final_combined_grad = combined_scaled_grad_input + combined_neg_scaled_input1
+    scaled_neg_input1_evict = neg_scaled_cubed_input2 * input1_evict
+    scaled_diff_input2_scaled_factor = sum_masked_broadcasted_scaled_leaky_weight * input2_evict
+    scaled_diff_input2_scaled_cubed_input2 = scaled_diff_input2_scaled_factor * scaling_factor
+    combined_scaled_neg_input1_evict = scaled_neg_input1_evict - scaled_diff_input2_scaled_cubed_input2
+    final_combined_scaled_input2 = combined_scaled_input2 + combined_scaled_neg_input1_evict
 
-    tl.store(output_grad_ptr + (r_block_index + 32 * x_block_index), leaky_combined_grad, xmask)
-    tl.store(output_ptr3 + (r_block_index + 32 * x_block_index), final_combined_grad, xmask)
+    tl.store(output_grad_ptr + (row_index + 32 * col_index), leaky_combined_grad, xmask)
+    tl.store(output_ptr3 + (row_index + 32 * col_index), final_combined_scaled_input2, xmask)

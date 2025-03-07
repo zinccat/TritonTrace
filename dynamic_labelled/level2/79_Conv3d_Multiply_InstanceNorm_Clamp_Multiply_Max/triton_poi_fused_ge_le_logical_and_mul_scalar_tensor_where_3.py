@@ -13,29 +13,29 @@ def triton_poi_fused_ge_le_logical_and_mul_scalar_tensor_where_3(
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
     mask = index < num_elements
-
-    element_index = index
-    channel_index = (index // kernel_size0) % 16
+    linear_index = index
+    batch_index = (index // kernel_size0) % 16
     depth_index = index // kernel_size1
 
-    input_data0 = tl.load(input_ptr0 + (element_index), mask, eviction_policy='evict_last')
-    input_data1 = tl.load(input_ptr1 + (channel_index), mask, eviction_policy='evict_last')
-    input_data2 = tl.load(input_ptr2 + (depth_index), mask, eviction_policy='evict_last')
-    input_data3 = tl.load(input_ptr3 + (depth_index), mask, eviction_policy='evict_last')
-    input_data4 = tl.load(input_ptr4 + (element_index), mask, eviction_policy='evict_last')
+    input0 = tl.load(input_ptr0 + (linear_index), mask, eviction_policy='evict_last')
+    input1 = tl.load(input_ptr1 + (batch_index), mask, eviction_policy='evict_last')
+    input2 = tl.load(input_ptr2 + (depth_index), mask, eviction_policy='evict_last')
+    input3 = tl.load(input_ptr3 + (depth_index), mask, eviction_policy='evict_last')
+    input4 = tl.load(input_ptr4 + (linear_index), mask, eviction_policy='evict_last')
 
-    intermediate_result1 = input_data0 * input_data1
-    intermediate_result2 = intermediate_result1 - input_data2
-    intermediate_result3 = intermediate_result2 * input_data3
+    multiply_result = input0 * input1
+    subtract_result = multiply_result - input2
+    multiply_result2 = subtract_result * input3
 
     lower_bound = -1.0
     upper_bound = 1.0
 
-    is_within_bounds = (intermediate_result3 >= lower_bound) & (intermediate_result3 <= upper_bound)
+    is_greater_equal = multiply_result2 >= lower_bound
+    is_less_equal = multiply_result2 <= upper_bound
+    within_bounds = is_greater_equal & is_less_equal
 
-    scaled_input4 = input_data4 * input_data1
+    multiply_result3 = input4 * input1
     zero_value = 0.0
 
-    final_result = tl.where(is_within_bounds, scaled_input4, zero_value)
-
-    tl.store(output_ptr0 + (element_index), final_result, mask)
+    result = tl.where(within_bounds, multiply_result3, zero_value)
+    tl.store(output_ptr0 + (linear_index), result, mask)

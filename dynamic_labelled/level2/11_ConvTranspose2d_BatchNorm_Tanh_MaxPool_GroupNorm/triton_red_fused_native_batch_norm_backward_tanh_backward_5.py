@@ -9,8 +9,8 @@ triton_helpers.set_driver_to_gpu()
 @triton.jit
 def triton_red_fused_native_batch_norm_backward_tanh_backward_5(
     input_grad_ptr, input_ptr, running_mean_ptr, running_var_ptr, 
-    output_grad_ptr0, output_grad_ptr1, kernel_size, xnumel, rnumel, 
-    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
+    output_grad_ptr0, output_grad_ptr1, kernel_size, 
+    xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
     xnumel = 384
     x_offset = tl.program_id(0) * XBLOCK

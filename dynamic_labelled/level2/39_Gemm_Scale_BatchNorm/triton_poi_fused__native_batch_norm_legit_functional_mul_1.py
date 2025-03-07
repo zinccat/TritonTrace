@@ -7,27 +7,29 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused__native_batch_norm_legit_functional_mul_1poi_fused__native_batch_norm_legit_functional_mul_1(
-    input_ptr_mean, input_ptr_var, input_ptr_scale, input_ptr_shift, input_ptr_input, input_ptr_output, 
-    output_ptr, scale_factor, num_elements, BLOCK_SIZE : tl.constexpr):
-
+def triton_poi_fused__native_batch_norm_legit_functional_mul_1(input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, epsilon_ptr, output_ptr, scale_factor, num_elements, BLOCK_SIZE : tl.constexpr):
     block_offset = tl.program_id(0) * BLOCK_SIZE
     block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
+    mask = block_indices < num_elements
     global_indices = block_indices
-    block_indices_mod = block_indices % 512
+    local_indices = block_indices % 512
 
-    mean = tl.load(input_ptr_mean + (global_indices), valid_mask)
-    variance = tl.load(input_ptr_var + (block_indices_mod), valid_mask, eviction_policy='evict_last')
-    scale = tl.load(input_ptr_scale + (block_indices_mod), valid_mask, eviction_policy='evict_last')
-    shift = tl.load(input_ptr_shift + (block_indices_mod), valid_mask, eviction_policy='evict_last')
-    input_data = tl.load(input_ptr_input + (global_indices), valid_mask, eviction_policy='evict_last')
-    output_data = tl.load(input_ptr_output + (block_indices_mod), valid_mask, eviction_policy='evict_last')
+    input_data = tl.load(input_ptr + (global_indices), mask)
+    scale_data = tl.load(scale_ptr + (local_indices), mask, eviction_policy='evict_last')
+    bias_data = tl.load(bias_ptr + (local_indices), mask, eviction_policy='evict_last')
+    mean_data = tl.load(mean_ptr + (local_indices), mask, eviction_policy='evict_last')
+    var_data = tl.load(var_ptr + (local_indices), mask, eviction_policy='evict_last')
+    epsilon_data = tl.load(epsilon_ptr + (local_indices), mask, eviction_policy='evict_last')
 
-    normalized_input = (input_data - mean) * scale
-    epsilon = 1e-05
-    inv_std_dev = tl.extra.cuda.libdevice.rsqrt(normalized_input + epsilon)
-    scaled_input = normalized_input * inv_std_dev
-    batch_norm_output = scaled_input * input_data + shift
+    scaled_input = input_data * scale_data
+    normalized_input = scaled_input - mean_data
+    scale_factor_float = scale_factor.to(tl.float32)
+    inv_std_dev = var_data / scale_factor_float
+    epsilon_value = 1e-05
+    adjusted_var = inv_std_dev + epsilon_value
+    reciprocal_sqrt = tl.extra.cuda.libdevice.rsqrt(adjusted_var)
+    normalized_scaled_input = normalized_input * reciprocal_sqrt
+    batch_norm_output = normalized_scaled_input * bias_data
+    final_output = batch_norm_output + epsilon_data
 
-    tl.store(output_ptr + (global_indices), batch_norm_output, valid_mask)
+    tl.store(output_ptr + (global_indices), final_output, mask)

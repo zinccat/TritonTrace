@@ -11,32 +11,30 @@ def triton_poi_fused_clamp_lift_fresh_minimum_native_dropout_native_group_norm_3
     input_ptr0, input_ptr1, input_ptr2, input_ptr3, input_ptr4, input_ptr5, 
     output_ptr0, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr
 ):
-    x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:]
-    x_mask = x_index < num_elements
-    x3 = x_index
-    x5 = x_index // kernel_size0
-    x1 = ((x_index // kernel_size1) % 16)
+    offset = tl.program_id(0) * XBLOCK
+    index = offset + tl.arange(0, XBLOCK)[:]
+    mask = index < num_elements
+    linear_index = index
+    group_index = index // kernel_size0
+    channel_index = ((index // kernel_size1) % 16)
     
-    input_masked = tl.load(input_ptr0 + (x3), x_mask, eviction_policy='evict_last').to(tl.int1)
-    input_data1 = tl.load(input_ptr1 + (x3), x_mask, eviction_policy='evict_last')
-    input_data2 = tl.load(input_ptr2 + (x5 // 2), x_mask, eviction_policy='evict_last')
-    input_data3 = tl.load(input_ptr3 + (x5 // 2), x_mask, eviction_policy='evict_last')
-    input_data4 = tl.load(input_ptr4 + (x1), x_mask, eviction_policy='evict_last')
-    input_data5 = tl.load(input_ptr5 + (x1), x_mask, eviction_policy='evict_last')
+    input_masked = tl.load(input_ptr0 + (linear_index), mask, eviction_policy='evict_last').to(tl.int1)
+    input_data = tl.load(input_ptr1 + (linear_index), mask, eviction_policy='evict_last')
+    group_mean = tl.load(input_ptr2 + (group_index // 2), mask, eviction_policy='evict_last')
+    group_var = tl.load(input_ptr3 + (group_index // 2), mask, eviction_policy='evict_last')
+    gamma = tl.load(input_ptr4 + (channel_index), mask, eviction_policy='evict_last')
+    beta = tl.load(input_ptr5 + (channel_index), mask, eviction_policy='evict_last')
     
-    float_input = input_masked.to(tl.float32)
-    subtracted = input_data1 - input_data2
-    multiplied1 = subtracted * input_data3
-    multiplied2 = multiplied1 * input_data4
-    added = multiplied2 + input_data5
+    normalized_data = input_data - group_mean
+    scaled_data = normalized_data * group_var
+    gamma_scaled = scaled_data * gamma
+    batch_norm_output = gamma_scaled + beta
     
-    min_value = 0.0
-    clamped_min = triton_helpers.minimum(added, min_value)
-    clamped_max = triton_helpers.maximum(clamped_min, min_value)
-    clamped = triton_helpers.minimum(clamped_max, 1.0)
+    clamped_output = triton_helpers.minimum(batch_norm_output, 0.0)
+    clamped_output = triton_helpers.maximum(clamped_output, 0.0)
+    clamped_output = triton_helpers.minimum(clamped_output, 1.0)
     
-    scaled_output = float_input * clamped
-    final_output = scaled_output * 1.25
+    dropout_output = input_masked.to(tl.float32) * clamped_output
+    scaled_dropout_output = dropout_output * 1.25
     
-    tl.store(output_ptr0 + (x3), final_output, x_mask)
+    tl.store(output_ptr0 + (linear_index), scaled_dropout_output, mask)

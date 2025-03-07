@@ -7,37 +7,27 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_mean_0red_fused_convolution_mean_0(
-    input_ptr0, input_ptr1, output_ptr0, kernel_size, input_num_elements, reduction_num_elements, 
-    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
-):
-    x_offset = tl.program_id(0) * XBLOCK
-    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < input_num_elements
-    r_base = tl.arange(0, RBLOCK)[None, :]
-    x_indices_3d = x_indices
-    x_indices_0d = (x_indices % 16)
+def triton_red_fused_convolution_mean_0(input_ptr0, input_ptr1, output_ptr0, kernel_size, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+    input_offset = tl.program_id(0) * XBLOCK
+    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
+    input_mask = input_index < input_num_elements
+    reduction_base = tl.arange(0, RBLOCK)[None, :]
+    input_3d_index = input_index
+    input_0d_index = (input_index % 16)
     
-    input_value1 = tl.load(input_ptr1 + (x_indices_0d), x_mask, eviction_policy='evict_last')
+    input_data_1 = tl.load(input_ptr1 + (input_0d_index), input_mask, eviction_policy='evict_last')
     accumulated_sum = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
     
-    for r_offset in range(0, reduction_num_elements, RBLOCK):
-        r_indices = r_offset + r_base
-        r_mask = r_indices < reduction_num_elements
-        r_indices_2d = r_indices
+    for reduction_offset in range(0, reduction_num_elements, RBLOCK):
+        reduction_index = reduction_offset + reduction_base
+        reduction_mask = reduction_index < reduction_num_elements
+        reduction_2d_index = reduction_index
         
-        input_value0 = tl.load(
-            input_ptr0 + (r_indices_2d + 4 * x_indices_3d + x_indices_3d * kernel_size * kernel_size + 4 * kernel_size * x_indices_3d),
-            r_mask & x_mask,
-            eviction_policy='evict_first',
-            other=0.0
-        )
-        
-        combined_values = input_value0 + input_value1
-        broadcasted_values = tl.broadcast_to(combined_values, [XBLOCK, RBLOCK])
-        accumulated_sum += broadcasted_values
-        
-        accumulated_sum = tl.where(r_mask & x_mask, accumulated_sum, accumulated_sum)
+        input_data_0 = tl.load(input_ptr0 + (reduction_2d_index + 4 * input_3d_index + input_3d_index * kernel_size * kernel_size + 4 * kernel_size * input_3d_index), reduction_mask & input_mask, eviction_policy='evict_first', other=0.0)
+        combined_data = input_data_0 + input_data_1
+        broadcasted_data = tl.broadcast_to(combined_data, [XBLOCK, RBLOCK])
+        updated_sum = accumulated_sum + broadcasted_data
+        accumulated_sum = tl.where(reduction_mask & input_mask, updated_sum, accumulated_sum)
     
-    reduced_sum = tl.sum(accumulated_sum, 1)[:, None]
-    tl.store(output_ptr0 + (x_indices_3d), reduced_sum, x_mask)
+    summed_result = tl.sum(accumulated_sum, 1)[:, None]
+    tl.store(output_ptr0 + (input_3d_index), summed_result, input_mask)

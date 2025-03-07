@@ -7,29 +7,37 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_min_native_group_norm_1per_fused_min_native_group_norm_1(
-    input_ptr_mean, input_ptr_var, input_ptr_beta, input_ptr_gamma, input_ptr_input, 
-    output_ptr_min, output_ptr_argmin, xnumel, rnumel):
-
+def triton_per_fused_min_native_group_norm_1(in_ptr0, in_ptr1, in_ptr2, in_ptr3, in_ptr4, out_ptr0, out_ptr1, xnumel, rnumel):
     XBLOCK: tl.constexpr = 1
     RBLOCK: tl.constexpr = 256
-
     x_offset = tl.program_id(0) * XBLOCK
     x_index = tl.full([1], x_offset, tl.int32)
+    tl.full([RBLOCK], True, tl.int1)
     r_index = tl.arange(0, RBLOCK)[:]
+    tl.full([RBLOCK], True, tl.int1)
+    r1 = r_index
+    x0 = x_index
+    input0 = tl.load(in_ptr0 + (r1 + 256 * x0), None)
+    input1 = tl.load(in_ptr1 + (8 * x0 + (r1 // 32)), None, eviction_policy='evict_last')
+    input2 = tl.load(in_ptr2 + (8 * x0 + (r1 // 32)), None, eviction_policy='evict_last')
+    input3 = tl.load(in_ptr3 + (r1), None, eviction_policy='evict_last')
+    input4 = tl.load(in_ptr4 + (r1), None, eviction_policy='evict_last')
     
-    mean = tl.load(input_ptr_mean + (r_index + 256 * x_index), None)
-    var = tl.load(input_ptr_var + (8 * x_index + (r_index // 32)), None, eviction_policy='evict_last')
-    beta = tl.load(input_ptr_beta + (8 * x_index + (r_index // 32)), None, eviction_policy='evict_last')
-    gamma = tl.load(input_ptr_gamma + (r_index), None, eviction_policy='evict_last')
-    input_data = tl.load(input_ptr_input + (r_index), None, eviction_policy='evict_last')
-
-    normalized_input = (input_data - mean) * (1 / (tl.sqrt(var / 32.0 + 1e-05)))
-    scaled_input = normalized_input * gamma + beta
-
-    broadcast_scaled_input = tl.broadcast_to(scaled_input, [RBLOCK])
-    min_value = triton_helpers.promote_to_tensor(triton_helpers.min2(broadcast_scaled_input, 0))
-    argmin_index = triton_helpers.promote_to_tensor(triton_helpers.min_with_index(broadcast_scaled_input, r_index, 0)[1])
-
-    tl.store(output_ptr_min + (x_index), min_value, None)
-    tl.store(output_ptr_argmin + (x_index), argmin_index, None)
+    normalized_input = input0 - input1
+    divisor = 32.0
+    normalized_mean = input2 / divisor
+    epsilon = 1e-05
+    adjusted_mean = normalized_mean + epsilon
+    reciprocal_sqrt = tl.extra.cuda.libdevice.rsqrt(adjusted_mean)
+    scaled_input = normalized_input * reciprocal_sqrt
+    weighted_input = scaled_input * input3
+    biased_output = weighted_input + input4
+    
+    broadcast_output = tl.broadcast_to(biased_output, [RBLOCK])
+    min_value = triton_helpers.promote_to_tensor(triton_helpers.min2(broadcast_output, 0))
+    r_index_broadcast = tl.broadcast_to(r_index, broadcast_output.shape)
+    min_value_tensor, min_index_tensor = triton_helpers.min_with_index(broadcast_output, r_index_broadcast, 0)
+    min_index = triton_helpers.promote_to_tensor(min_index_tensor)
+    
+    tl.store(out_ptr0 + (x0), min_value, None)
+    tl.store(out_ptr1 + (x0), min_index, None)

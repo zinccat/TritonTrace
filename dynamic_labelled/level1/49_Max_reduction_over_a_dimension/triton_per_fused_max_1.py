@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_max_1per_fused_max_1(in_ptr0, out_ptr0, kernel_size, num_elements_x, num_elements_r, XBLOCK: tl.constexpr):
+def triton_per_fused_max_1(in_ptr0, out_ptr0, kernel_size, num_elements_x, num_elements_r, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 2
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]

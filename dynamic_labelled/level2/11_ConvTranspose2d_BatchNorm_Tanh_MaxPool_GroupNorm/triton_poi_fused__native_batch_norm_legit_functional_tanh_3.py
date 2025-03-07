@@ -7,9 +7,8 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused__native_batch_norm_legit_functional_tanh_3poi_fused__native_batch_norm_legit_functional_tanh_3(
-    input_ptr_mean, input_ptr_var, input_ptr_scale, input_ptr_bias, input_ptr_x, 
-    output_ptr, kernel_size, num_elements, XBLOCK: tl.constexpr
+def triton_poi_fused__native_batch_norm_legit_functional_tanh_3(
+    input_ptr, mean_ptr, variance_ptr, weight_ptr, bias_ptr, output_ptr, kernel_size, num_elements, XBLOCK: tl.constexpr
 ):
     x_offset = tl.program_id(0) * XBLOCK
     x_index = x_offset + tl.arange(0, XBLOCK)[:]
@@ -17,23 +16,23 @@ def triton_poi_fused__native_batch_norm_legit_functional_tanh_3poi_fused__native
     x3 = x_index
     x1 = ((x_index // 4096) % 64)
     
-    input_mean = tl.load(input_ptr_mean + (x3), None)
-    input_var = tl.load(input_ptr_var + (x1), None, eviction_policy='evict_last')
-    input_scale = tl.load(input_ptr_scale + (x1), None, eviction_policy='evict_last')
-    input_bias = tl.load(input_ptr_bias + (x1), None, eviction_policy='evict_last')
-    input_x = tl.load(input_ptr_x + (x3), None)
+    input_value = tl.load(input_ptr + (x3), None)
+    mean_value = tl.load(mean_ptr + (x1), None, eviction_policy='evict_last')
+    variance_value = tl.load(variance_ptr + (x1), None, eviction_policy='evict_last')
+    weight_value = tl.load(weight_ptr + (x1), None, eviction_policy='evict_last')
+    bias_value = tl.load(bias_ptr + (x1), None, eviction_policy='evict_last')
     
-    normalized_input = input_x - input_mean
-    variance_factor = 4096 * kernel_size
-    variance_factor_float = variance_factor.to(tl.float32)
-    normalized_variance = input_var / variance_factor_float
+    normalized_input = input_value - mean_value
+    variance_scale = 4096 * kernel_size
+    variance_scale_float = variance_scale.to(tl.float32)
+    variance_adjusted = variance_value / variance_scale_float
     epsilon = 1e-05
-    adjusted_variance = normalized_variance + epsilon
-    inv_sqrt_variance = tl.extra.cuda.libdevice.rsqrt(adjusted_variance)
+    variance_adjusted_epsilon = variance_adjusted + epsilon
+    inv_sqrt_variance = tl.extra.cuda.libdevice.rsqrt(variance_adjusted_epsilon)
     
     scaled_input = normalized_input * inv_sqrt_variance
-    scaled_and_shifted_input = scaled_input * input_scale
-    biased_input = scaled_and_shifted_input + input_bias
+    weighted_input = scaled_input * weight_value
+    biased_input = weighted_input + bias_value
     tanh_output = tl.extra.cuda.libdevice.tanh(biased_input)
     
     tl.store(output_ptr + (x3), tanh_output, None)

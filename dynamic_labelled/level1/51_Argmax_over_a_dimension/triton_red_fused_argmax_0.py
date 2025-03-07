@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_argmax_0red_fused_argmax_0(in_ptr0, out_ptr0, kernel_size, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+def triton_red_fused_argmax_0(in_ptr0, out_ptr0, kernel_size, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
     input_offset = tl.program_id(0) * XBLOCK
     input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
     input_mask = input_index < input_num_elements
@@ -30,6 +30,6 @@ def triton_red_fused_argmax_0red_fused_argmax_0(in_ptr0, out_ptr0, kernel_size, 
         max_values = tl.where(reduction_mask & input_mask, max_values_next, max_values)
         max_indices = tl.where(reduction_mask & input_mask, max_indices_next, max_indices)
 
-    final_max_index, _ = triton_helpers.max_with_index(max_values, max_indices, 1)
-    final_indices = final_max_index[:, None]
+    final_max_indices, _ = triton_helpers.max_with_index(max_values, max_indices, 1)
+    final_indices = final_max_indices[:, None]
     tl.store(out_ptr0 + (original_index), final_indices, input_mask)

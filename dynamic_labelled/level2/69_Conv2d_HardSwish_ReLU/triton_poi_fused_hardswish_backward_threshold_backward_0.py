@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_hardswish_backward_threshold_backward_0poi_fused_hardswish_backward_threshold_backward_0(
+def triton_poi_fused_hardswish_backward_threshold_backward_0(
     in_out_ptr0, in_ptr0, in_ptr1, xnumel, XBLOCK: tl.constexpr
 ):
     xoffset = tl.program_id(0) * XBLOCK
@@ -15,10 +15,10 @@ def triton_poi_fused_hardswish_backward_threshold_backward_0poi_fused_hardswish_
     xmask = xindex < xnumel
     x0 = xindex
 
-    # Load input and intermediate values
+    # Load data from input pointers
     grad_output = tl.load(in_out_ptr0 + (x0), xmask)
-    relu_mask = tl.load(in_ptr0 + (x0), xmask).to(tl.int1)
-    input_data = tl.load(in_ptr1 + (x0), xmask)
+    input_tensor = tl.load(in_ptr0 + (x0), xmask).to(tl.int1)
+    threshold_tensor = tl.load(in_ptr1 + (x0), xmask)
 
     # Define constants
     lower_bound = -3.0
@@ -28,18 +28,18 @@ def triton_poi_fused_hardswish_backward_threshold_backward_0poi_fused_hardswish_
     offset = 0.5
 
     # Compute conditions
-    is_below_lower = grad_output < lower_bound
+    is_below_lower_bound = grad_output < lower_bound
     is_within_bounds = grad_output <= upper_bound
 
-    # Compute HardSwish backward
-    relu_grad = tl.where(relu_mask, zero, input_data)
-    scaled_grad = grad_output * scale_factor
-    shifted_grad = scaled_grad + offset
-    hardswish_grad = relu_grad * shifted_grad
-    bounded_grad = tl.where(is_within_bounds, hardswish_grad, relu_grad)
+    # Compute intermediate values
+    thresholded_value = tl.where(input_tensor, zero, threshold_tensor)
+    scaled_output = grad_output * scale_factor
+    adjusted_output = scaled_output + offset
+    hardswish_output = thresholded_value * adjusted_output
 
-    # Apply threshold
-    final_grad = tl.where(is_below_lower, zero, bounded_grad)
+    # Apply conditions to compute final gradient
+    final_gradient = tl.where(is_within_bounds, hardswish_output, thresholded_value)
+    final_gradient = tl.where(is_below_lower_bound, zero, final_gradient)
 
-    # Store the result
-    tl.store(in_out_ptr0 + (x0), final_grad, xmask)
+    # Store the result back to the output pointer
+    tl.store(in_out_ptr0 + (x0), final_gradient, xmask)

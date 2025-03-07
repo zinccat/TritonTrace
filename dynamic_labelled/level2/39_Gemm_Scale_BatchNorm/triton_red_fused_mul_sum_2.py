@@ -7,25 +7,25 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_mul_sum_2red_fused_mul_sum_2(input_ptr0, input_ptr1, output_ptr0, num_elements_x, num_elements_r, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
-    num_elements_x = 512
+def triton_red_fused_mul_sum_2(in_ptr0, in_ptr1, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+    xnumel = 512
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < num_elements_x
+    x_mask = x_indices < xnumel
     r_base = tl.arange(0, RBLOCK)[None, :]
     x_indices_0 = x_indices
-    temp_accumulator = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    accumulated_result = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
     
-    for r_offset in range(0, num_elements_r, RBLOCK):
+    for r_offset in range(0, rnumel, RBLOCK):
         r_indices = r_offset + r_base
-        r_mask = r_indices < num_elements_r
+        r_mask = r_indices < rnumel
         r_indices_1 = r_indices
-        temp0 = tl.load(input_ptr0 + (x_indices_0 + 512 * r_indices_1), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
-        temp1 = tl.load(input_ptr1 + (x_indices_0 + 512 * r_indices_1), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
-        temp2 = temp0 * temp1
-        temp3 = tl.broadcast_to(temp2, [XBLOCK, RBLOCK])
-        temp5 = temp_accumulator + temp3
-        temp_accumulator = tl.where(r_mask & x_mask, temp5, temp_accumulator)
+        input_data_0 = tl.load(in_ptr0 + (x_indices_0 + 512 * r_indices_1), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
+        input_data_1 = tl.load(in_ptr1 + (x_indices_0 + 512 * r_indices_1), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
+        multiplied_data = input_data_0 * input_data_1
+        broadcasted_data = tl.broadcast_to(multiplied_data, [XBLOCK, RBLOCK])
+        updated_accumulated_result = accumulated_result + broadcasted_data
+        accumulated_result = tl.where(r_mask & x_mask, updated_accumulated_result, accumulated_result)
     
-    temp4 = tl.sum(temp_accumulator, 1)[:, None]
-    tl.store(output_ptr0 + (x_indices_0), temp4, x_mask)
+    summed_result = tl.sum(accumulated_result, 1)[:, None]
+    tl.store(out_ptr0 + (x_indices_0), summed_result, x_mask)

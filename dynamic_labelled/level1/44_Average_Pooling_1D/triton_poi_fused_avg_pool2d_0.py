@@ -7,53 +7,49 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_avg_pool2d_0poi_fused_avg_pool2d_0(in_ptr0, out_ptr0, kernel_size_x, kernel_size_y, total_elements, XBLOCK: tl.constexpr):
-    offset = tl.program_id(0) * XBLOCK
-    index = offset + tl.arange(0, XBLOCK)[:]
-    mask = index < total_elements
-    x_mod_kernel = index % kernel_size_x
-    x_div_kernel = index // kernel_size_x
-    flat_index = index
-    zero_mask = tl.full([1], 0, tl.int64)
-    valid_mask = zero_mask >= zero_mask
-    one_mask = tl.full([1], 1, tl.int64)
-    within_bounds_mask = zero_mask < one_mask
-    base_mask = valid_mask & within_bounds_mask
-    adjusted_index = (-1) + 2 * x_mod_kernel
-    valid_adjusted_index = adjusted_index >= zero_mask
-    within_kernel_y = adjusted_index < kernel_size_y
-    valid_adjusted_index_mask = valid_adjusted_index & within_kernel_y
-    combined_mask = base_mask & valid_adjusted_index_mask
-    value1 = tl.load(in_ptr0 + ((-1) + 2 * x_mod_kernel + kernel_size_y * x_div_kernel), combined_mask & mask, eviction_policy='evict_last', other=0.0)
-    
-    adjusted_index2 = 2 * x_mod_kernel
-    valid_adjusted_index2 = adjusted_index2 >= zero_mask
-    within_kernel_y2 = adjusted_index2 < kernel_size_y
-    valid_adjusted_index_mask2 = valid_adjusted_index2 & within_kernel_y2
-    combined_mask2 = base_mask & valid_adjusted_index_mask2
-    value2 = tl.load(in_ptr0 + (2 * x_mod_kernel + kernel_size_y * x_div_kernel), combined_mask2 & mask, eviction_policy='evict_last', other=0.0)
-    
-    sum_values = value2 + value1
-    
-    adjusted_index3 = 1 + 2 * x_mod_kernel
-    valid_adjusted_index3 = adjusted_index3 >= zero_mask
-    within_kernel_y3 = adjusted_index3 < kernel_size_y
-    valid_adjusted_index_mask3 = valid_adjusted_index3 & within_kernel_y3
-    combined_mask3 = base_mask & valid_adjusted_index_mask3
-    value3 = tl.load(in_ptr0 + (1 + 2 * x_mod_kernel + kernel_size_y * x_div_kernel), combined_mask3 & mask, eviction_policy='evict_last', other=0.0)
-    
-    sum_values += value3
-    
-    adjusted_index4 = 2 + 2 * x_mod_kernel
-    valid_adjusted_index4 = adjusted_index4 >= zero_mask
-    within_kernel_y4 = adjusted_index4 < kernel_size_y
-    valid_adjusted_index_mask4 = valid_adjusted_index4 & within_kernel_y4
-    combined_mask4 = base_mask & valid_adjusted_index_mask4
-    value4 = tl.load(in_ptr0 + (2 + 2 * x_mod_kernel + kernel_size_y * x_div_kernel), combined_mask4 & mask, eviction_policy='evict_last', other=0.0)
-    
-    sum_values += value4
-    
+def triton_poi_fused_avg_pool2d_0(in_ptr0, out_ptr0, kernel_size_x, kernel_size_y, total_elements, XBLOCK: tl.constexpr):
+    x_offset = tl.program_id(0) * XBLOCK
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:]
+    x_mask = x_indices < total_elements
+    x_mod_kernel = x_indices % kernel_size_x
+    x_div_kernel = x_indices // kernel_size_x
+    x_full_index = x_indices
+
+    # Temporary variables for logical operations
+    is_valid_index = tl.full([1], 0, tl.int64)
+    is_non_negative = is_valid_index >= is_valid_index
+    is_less_than_one = is_valid_index < tl.full([1], 1, tl.int64)
+    valid_index_mask = is_non_negative & is_less_than_one
+
+    # Load and accumulate values
+    load_index_1 = (-1) + 2 * x_mod_kernel
+    is_within_bounds_1 = (load_index_1 >= is_valid_index) & (load_index_1 < kernel_size_y)
+    valid_load_mask_1 = valid_index_mask & is_within_bounds_1
+    value_1 = tl.load(in_ptr0 + (load_index_1 + kernel_size_y * x_div_kernel), valid_load_mask_1 & x_mask, eviction_policy='evict_last', other=0.0)
+
+    load_index_2 = 2 * x_mod_kernel
+    is_within_bounds_2 = (load_index_2 >= is_valid_index) & (load_index_2 < kernel_size_y)
+    valid_load_mask_2 = valid_index_mask & is_within_bounds_2
+    value_2 = tl.load(in_ptr0 + (load_index_2 + kernel_size_y * x_div_kernel), valid_load_mask_2 & x_mask, eviction_policy='evict_last', other=0.0)
+
+    load_index_3 = 1 + 2 * x_mod_kernel
+    is_within_bounds_3 = (load_index_3 >= is_valid_index) & (load_index_3 < kernel_size_y)
+    valid_load_mask_3 = valid_index_mask & is_within_bounds_3
+    value_3 = tl.load(in_ptr0 + (load_index_3 + kernel_size_y * x_div_kernel), valid_load_mask_3 & x_mask, eviction_policy='evict_last', other=0.0)
+
+    load_index_4 = 2 + 2 * x_mod_kernel
+    is_within_bounds_4 = (load_index_4 >= is_valid_index) & (load_index_4 < kernel_size_y)
+    valid_load_mask_4 = valid_index_mask & is_within_bounds_4
+    value_4 = tl.load(in_ptr0 + (load_index_4 + kernel_size_y * x_div_kernel), valid_load_mask_4 & x_mask, eviction_policy='evict_last', other=0.0)
+
+    # Accumulate values
+    accumulated_value = value_2 + value_1
+    accumulated_value += value_3
+    accumulated_value += value_4
+
+    # Calculate divisor for average
     divisor = 1 + ((-2) * x_mod_kernel) + ((1 + kernel_size_y) * ((1 + kernel_size_y) <= (3 + 2 * x_mod_kernel)) + (3 + 2 * x_mod_kernel) * ((3 + 2 * x_mod_kernel) < (1 + kernel_size_y)))
-    average_value = sum_values / divisor
-    
-    tl.store(out_ptr0 + (flat_index), average_value, mask)
+
+    # Compute average and store result
+    average_value = accumulated_value / divisor
+    tl.store(out_ptr0 + (x_full_index), average_value, x_mask)

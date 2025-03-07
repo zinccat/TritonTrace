@@ -17,39 +17,24 @@ def triton_per_fused__softmax__softmax_backward_data_div_hardswish_relu_0(
     x_mask = x_index < x_num_elements
     r_index = tl.arange(0, RBLOCK)[None, :]
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
-    r_block_index = r_index
-    x_block_index = x_index // kernel_size0
-    x_kernel_index = (x_index % kernel_size0)
-    x_full_index = x_index
-
-    temp0 = tl.load(input_ptr0 + (r_block_index + 16 * x_block_index), x_mask, eviction_policy='evict_last', other=0.0)
+    r2 = r_index
+    x4 = x_index // kernel_size0
+    x3 = (x_index % kernel_size0)
+    x5 = x_index
+    temp0 = tl.load(input_ptr0 + (r2 + 16 * x4), x_mask, eviction_policy='evict_last', other=0.0)
     temp4 = tl.load(
-        input_ptr1 + (
-            x_kernel_index + 
-            ((-128) * x_block_index) + 
-            ((-8) * r_block_index) + 
-            ((-32) * x_block_index * kernel_size2 * kernel_size2) + 
-            ((-2) * r_block_index * kernel_size2 * kernel_size2) + 
-            4 * kernel_size1 * r_block_index + 
-            8 * kernel_size2 * r_block_index + 
-            64 * kernel_size1 * x_block_index + 
-            128 * kernel_size2 * x_block_index + 
-            kernel_size1 * r_block_index * kernel_size2 * kernel_size2 + 
-            ((-64) * kernel_size1 * kernel_size2 * x_block_index) + 
-            ((-4) * kernel_size1 * kernel_size2 * r_block_index) + 
-            16 * kernel_size1 * x_block_index * kernel_size2 * kernel_size2
-        ), 
-        x_mask, 
-        eviction_policy='evict_last', 
-        other=0.0
+        input_ptr1 + (x3 + ((-128) * x4) + ((-8) * r2) + ((-32) * x4 * kernel_size2 * kernel_size2) + 
+                      ((-2) * r2 * kernel_size2 * kernel_size2) + 4 * kernel_size1 * r2 + 8 * kernel_size2 * r2 + 
+                      64 * kernel_size1 * x4 + 128 * kernel_size2 * x4 + kernel_size1 * r2 * kernel_size2 * kernel_size2 + 
+                      ((-64) * kernel_size1 * kernel_size2 * x4) + ((-4) * kernel_size1 * kernel_size2 * r2) + 
+                      16 * kernel_size1 * x4 * kernel_size2 * kernel_size2), 
+        x_mask, eviction_policy='evict_last', other=0.0
     )
-    temp16 = tl.load(input_ptr2 + (x_full_index), x_mask, eviction_policy='evict_last')
-    temp19 = tl.load(input_ptr3 + (x_full_index), x_mask, eviction_policy='evict_last')
-
+    temp16 = tl.load(input_ptr2 + (x5), x_mask, eviction_policy='evict_last')
+    temp19 = tl.load(input_ptr3 + (x5), x_mask, eviction_policy='evict_last')
     temp1 = kernel_size0
     temp2 = temp1.to(tl.float32)
     temp3 = temp0 / temp2
-
     temp5 = 3.0
     temp6 = temp4 + temp5
     temp7 = 0.0
@@ -61,7 +46,6 @@ def triton_per_fused__softmax__softmax_backward_data_div_hardswish_relu_0(
     temp13 = temp11 * temp12
     temp14 = tl.full([1, 1], 0, tl.int32)
     temp15 = triton_helpers.maximum(temp14, temp13)
-
     temp17 = temp15 - temp16
     temp18 = tl.math.exp(temp17)
     temp20 = temp18 / temp19
@@ -69,5 +53,4 @@ def triton_per_fused__softmax__softmax_backward_data_div_hardswish_relu_0(
     temp22 = tl.broadcast_to(temp21, [XBLOCK, RBLOCK])
     temp24 = tl.where(x_mask, temp22, 0)
     temp25 = tl.sum(temp24, 1)[:, None]
-
-    tl.store(output_ptr0 + (x_full_index), temp25, x_mask)
+    tl.store(output_ptr0 + (x5), temp25, x_mask)

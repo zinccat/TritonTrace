@@ -18,68 +18,67 @@ def triton_per_fused_native_group_norm_native_group_norm_backward_0(
     rindex = tl.arange(0, RBLOCK)[None, :]
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
     
-    reduced_index = rindex
-    expanded_index = xindex
-    element_index = xindex % 16
+    r_block_index = rindex
+    x_block_index = xindex
+    x_mod_index = xindex % 16
     
-    input_grad = tl.load(in_ptr0 + (reduced_index + 64 * expanded_index), xmask, other=0.0)
-    input_data = tl.load(in_ptr1 + (expanded_index), xmask)
-    mean = tl.load(in_ptr2 + (expanded_index), xmask)
-    variance = tl.load(in_ptr3 + (reduced_index + 64 * element_index), xmask, eviction_policy='evict_last', other=0.0)
-    inv_std = tl.load(in_ptr4 + (reduced_index + 64 * element_index), xmask, eviction_policy='evict_last', other=0.0)
-    grad_output = tl.load(in_ptr5 + (reduced_index + 64 * expanded_index), xmask, other=0.0)
-    swish_grad = tl.load(in_ptr6 + (reduced_index + 64 * element_index), xmask, eviction_policy='evict_last', other=0.0)
+    input_grad = tl.load(in_ptr0 + (r_block_index + 64 * x_block_index), xmask, other=0.0)
+    input_data = tl.load(in_ptr1 + (x_block_index), xmask)
+    mean = tl.load(in_ptr2 + (x_block_index), xmask)
+    variance = tl.load(in_ptr3 + (r_block_index + 64 * x_mod_index), xmask, eviction_policy='evict_last', other=0.0)
+    inv_std = tl.load(in_ptr4 + (r_block_index + 64 * x_mod_index), xmask, eviction_policy='evict_last', other=0.0)
+    grad_output = tl.load(in_ptr5 + (r_block_index + 64 * x_block_index), xmask, other=0.0)
+    weight = tl.load(in_ptr6 + (r_block_index + 64 * x_mod_index), xmask, eviction_policy='evict_last', other=0.0)
     
-    mean_adjusted = tl.load(in_ptr2 + (expanded_index), xmask, eviction_policy='evict_last')
-    input_data_adjusted = tl.load(in_ptr1 + (expanded_index), xmask, eviction_policy='evict_last')
+    mean_evicted = tl.load(in_ptr2 + (x_block_index), xmask, eviction_policy='evict_last')
+    input_data_evicted = tl.load(in_ptr1 + (x_block_index), xmask, eviction_policy='evict_last')
     
     normalized_input = input_grad - input_data
     normalized_input_scaled = normalized_input * mean
-    normalized_input_scaled_inv_std = normalized_input_scaled * inv_std
-    swish_input = normalized_input_scaled_inv_std + inv_std
-    swish_output = tl.sigmoid(swish_input)
-    swish_output_scaled = swish_input * swish_output
-    swish_grad_scaled = swish_output_scaled * swish_grad
-    swish_output_scaled_sigmoid = tl.sigmoid(swish_grad_scaled)
-    grad_output_scaled = grad_output * swish_output_scaled_sigmoid
-    grad_output_scaled_swish = grad_output * swish_grad_scaled
+    normalized_input_scaled_weighted = normalized_input_scaled * variance
+    normalized_input_scaled_weighted_inv_std = normalized_input_scaled_weighted + inv_std
+    sigmoid_output = tl.sigmoid(normalized_input_scaled_weighted_inv_std)
+    sigmoid_output_scaled = normalized_input_scaled_weighted_inv_std * sigmoid_output
+    weighted_sigmoid_output = sigmoid_output_scaled * weight
+    sigmoid_weighted = tl.sigmoid(weighted_sigmoid_output)
+    grad_output_scaled = grad_output * sigmoid_weighted
     one = 1.0
-    one_minus_swish_output = one - swish_output_scaled_sigmoid
-    swish_output_scaled_sigmoid_scaled = swish_output_scaled_sigmoid * one_minus_swish_output
-    grad_output_scaled_swish_scaled = grad_output_scaled_swish * swish_output_scaled_sigmoid_scaled
-    grad_output_combined = grad_output_scaled + grad_output_scaled_swish_scaled
-    grad_output_combined_scaled = grad_output_combined * inv_std
-    swish_output_scaled_grad = grad_output_combined_scaled * swish_output
-    swish_input_scaled_grad = grad_output_combined_scaled * swish_input
-    one_minus_swish_output_scaled = one - swish_output
-    swish_output_scaled_grad_scaled = swish_input_scaled_grad * one_minus_swish_output_scaled
-    grad_output_final = swish_output_scaled_grad + swish_output_scaled_grad_scaled
-    grad_input_scaled = grad_output_final * input_grad
-    grad_input_scaled_inv_std = grad_input_scaled * inv_std
-    grad_input_broadcast = tl.broadcast_to(grad_input_scaled_inv_std, [XBLOCK, RBLOCK])
-    grad_input_masked = tl.where(xmask, grad_input_broadcast, 0)
-    grad_input_sum = tl.sum(grad_input_masked, 1)[:, None]
+    one_minus_sigmoid_weighted = one - sigmoid_weighted
+    grad_output_scaled_one_minus_sigmoid = grad_output * one_minus_sigmoid_weighted
+    grad_output_scaled_one_minus_sigmoid_weighted = grad_output_scaled_one_minus_sigmoid * sigmoid_weighted
+    combined_grad_output = grad_output_scaled + grad_output_scaled_one_minus_sigmoid_weighted
+    combined_grad_output_weighted = combined_grad_output * weight
+    combined_grad_output_weighted_sigmoid = combined_grad_output_weighted * sigmoid_output
+    combined_grad_output_weighted_input = combined_grad_output_weighted * normalized_input_scaled_weighted_inv_std
+    one_minus_sigmoid_output = one - sigmoid_output
+    sigmoid_output_scaled_one_minus_sigmoid = combined_grad_output_weighted_input * (sigmoid_output * one_minus_sigmoid_output)
+    final_combined_grad_output = combined_grad_output_weighted_sigmoid + sigmoid_output_scaled_one_minus_sigmoid
+    final_combined_grad_output_scaled = final_combined_grad_output * input_grad
+    final_combined_grad_output_scaled_weighted = final_combined_grad_output_scaled * variance
     
-    grad_input_scaled_broadcast = tl.broadcast_to(grad_input_scaled_inv_std, [XBLOCK, RBLOCK])
-    grad_input_scaled_masked = tl.where(xmask, grad_input_scaled_broadcast, 0)
-    grad_input_scaled_sum = tl.sum(grad_input_scaled_masked, 1)[:, None]
+    broadcasted_final_combined_grad_output_scaled_weighted = tl.broadcast_to(final_combined_grad_output_scaled_weighted, [XBLOCK, RBLOCK])
+    masked_broadcasted_final_combined_grad_output_scaled_weighted = tl.where(xmask, broadcasted_final_combined_grad_output_scaled_weighted, 0)
+    sum_masked_broadcasted_final_combined_grad_output_scaled_weighted = tl.sum(masked_broadcasted_final_combined_grad_output_scaled_weighted, 1)[:, None]
     
-    mean_scaled = mean_adjusted * inv_std
-    grad_input_combined = grad_output_final * mean_scaled
-    grad_input_adjusted = grad_input_scaled_sum * input_data_adjusted
-    grad_input_adjusted_diff = grad_input_adjusted - grad_input_sum
-    grad_input_adjusted_scaled = grad_input_adjusted_diff * mean_adjusted
-    grad_input_adjusted_scaled_cubed = grad_input_adjusted_scaled * grad_input_adjusted_scaled * grad_input_adjusted_scaled
-    scaling_factor = 0.015625
-    grad_input_adjusted_scaled_scaled = grad_input_adjusted_scaled_cubed * scaling_factor
-    grad_input_adjusted_scaled_input = input_grad * grad_input_adjusted_scaled_scaled
-    grad_input_adjusted_combined = grad_input_combined + grad_input_adjusted_scaled_input
-    grad_input_adjusted_scaled_neg = -grad_input_adjusted_scaled_scaled
-    grad_input_adjusted_scaled_input_neg = grad_input_adjusted_scaled_neg * input_data_adjusted
-    grad_input_adjusted_scaled_mean = grad_input_scaled_sum * mean_adjusted
-    grad_input_adjusted_scaled_mean_scaled = grad_input_adjusted_scaled_mean * scaling_factor
-    grad_input_adjusted_scaled_input_neg_adjusted = grad_input_adjusted_scaled_input_neg - grad_input_adjusted_scaled_mean_scaled
-    grad_input_adjusted_final = grad_input_adjusted_combined + grad_input_adjusted_scaled_input_neg_adjusted
+    final_combined_grad_output_scaled = final_combined_grad_output * variance
+    broadcasted_final_combined_grad_output_scaled = tl.broadcast_to(final_combined_grad_output_scaled, [XBLOCK, RBLOCK])
+    masked_broadcasted_final_combined_grad_output_scaled = tl.where(xmask, broadcasted_final_combined_grad_output_scaled, 0)
+    sum_masked_broadcasted_final_combined_grad_output_scaled = tl.sum(masked_broadcasted_final_combined_grad_output_scaled, 1)[:, None]
     
-    tl.store(out_ptr0 + (reduced_index + 64 * expanded_index), swish_input, xmask)
-    tl.store(in_out_ptr0 + (reduced_index + 64 * expanded_index), grad_input_adjusted_final, xmask)
+    mean_scaled = mean * variance
+    final_combined_grad_output_scaled_mean = final_combined_grad_output * mean_scaled
+    sum_masked_input_data_evicted = sum_masked_broadcasted_final_combined_grad_output_scaled * input_data_evicted
+    sum_masked_input_data_evicted_minus_sum_masked_broadcasted_final_combined_grad_output_scaled = sum_masked_input_data_evicted - sum_masked_broadcasted_final_combined_grad_output_scaled
+    sum_masked_input_data_evicted_minus_sum_masked_broadcasted_final_combined_grad_output_scaled_scaled = sum_masked_input_data_evicted_minus_sum_masked_broadcasted_final_combined_grad_output_scaled * mean_scaled
+    sum_masked_input_data_evicted_scaled = sum_masked_input_data_evicted * mean_scaled
+    sum_masked_input_data_evicted_scaled_scaled = sum_masked_input_data_evicted_scaled * 0.015625
+    input_grad_scaled = input_grad * sum_masked_input_data_evicted_scaled_scaled
+    final_combined_grad_output_scaled_mean_plus_input_grad_scaled = final_combined_grad_output_scaled_mean + input_grad_scaled
+    negative_sum_masked_input_data_evicted_scaled_scaled = -sum_masked_input_data_evicted_scaled_scaled
+    negative_sum_masked_input_data_evicted_scaled_scaled_input_data_evicted = negative_sum_masked_input_data_evicted_scaled_scaled * input_data_evicted
+    sum_masked_input_data_evicted_scaled_scaled = sum_masked_input_data_evicted_scaled * 0.015625
+    negative_sum_masked_input_data_evicted_scaled_scaled_input_data_evicted_minus_sum_masked_input_data_evicted_scaled_scaled = negative_sum_masked_input_data_evicted_scaled_scaled_input_data_evicted - sum_masked_input_data_evicted_scaled_scaled
+    final_combined_grad_output_scaled_mean_plus_input_grad_scaled_plus_negative_sum_masked_input_data_evicted_scaled_scaled_input_data_evicted_minus_sum_masked_input_data_evicted_scaled_scaled = final_combined_grad_output_scaled_mean_plus_input_grad_scaled + negative_sum_masked_input_data_evicted_scaled_scaled_input_data_evicted_minus_sum_masked_input_data_evicted_scaled_scaled
+    
+    tl.store(out_ptr0 + (r_block_index + 64 * x_block_index), normalized_input_scaled_weighted_inv_std, xmask)
+    tl.store(in_out_ptr0 + (r_block_index + 64 * x_block_index), final_combined_grad_output_scaled_mean_plus_input_grad_scaled_plus_negative_sum_masked_input_data_evicted_scaled_scaled_input_data_evicted_minus_sum_masked_input_data_evicted_scaled_scaled, xmask)

@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_mul_sum_2per_fused_mul_sum_2(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
+def triton_per_fused_mul_sum_2(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
     xnumel = 16
     rnumel = 15
     RBLOCK: tl.constexpr = 16
@@ -21,15 +21,17 @@ def triton_per_fused_mul_sum_2per_fused_mul_sum_2(in_ptr0, out_ptr0, xnumel, rnu
     reduction_indices = tl.arange(0, RBLOCK)[None, :]
     reduction_mask = reduction_indices < rnumel
     
-    # Calculate the indices for loading data
-    reduction_index = reduction_indices
-    input_index = input_indices
+    # Load input data with masking
+    input_data = tl.load(in_ptr0 + (input_indices + 16 * reduction_indices), reduction_mask & input_mask, other=0.0)
     
-    # Load data with masking and broadcasting
-    loaded_data = tl.load(in_ptr0 + (input_index + 16 * reduction_index), reduction_mask & input_mask, other=0.0)
-    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
+    # Broadcast loaded data to match the block size
+    broadcasted_data = tl.broadcast_to(input_data, [XBLOCK, RBLOCK])
+    
+    # Apply mask and zero out out-of-bound elements
     masked_data = tl.where(reduction_mask & input_mask, broadcasted_data, 0)
     
-    # Sum along the reduction dimension and store the result
+    # Sum along the reduction dimension
     summed_data = tl.sum(masked_data, 1)[:, None]
-    tl.store(out_ptr0 + (input_index), summed_data, input_mask)
+    
+    # Store the result back to the output pointer
+    tl.store(out_ptr0 + (input_indices), summed_data, input_mask)

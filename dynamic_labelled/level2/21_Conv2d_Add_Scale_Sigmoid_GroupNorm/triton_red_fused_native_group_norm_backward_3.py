@@ -8,7 +8,7 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_red_fused_native_group_norm_backward_3(
-    input_grad_ptr, input_ptr, scale_ptr, bias_ptr, output_grad_ptr, output_ptr, 
+    input_grad_ptr, input_ptr, mean_ptr, inv_std_ptr, output_grad_ptr, output_ptr, 
     xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
     xnumel = 16
@@ -18,32 +18,32 @@ def triton_red_fused_native_group_norm_backward_3(
     rbase = tl.arange(0, RBLOCK)[None, :]
     x3 = xindex
     x1 = xindex // 2
-    sum_grad_input = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    sum_scale = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-
+    sum_grad_xr = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    sum_input_xr = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    
     for roffset in range(0, rnumel, RBLOCK):
         rindex = roffset + rbase
         rmask = rindex < rnumel
         r2 = rindex
         grad_input = tl.load(input_grad_ptr + (x3 + 16 * r2), rmask & xmask, eviction_policy='evict_first', other=0.0)
         input_value = tl.load(input_ptr + (x3 + 16 * r2), rmask & xmask, eviction_policy='evict_first', other=0.0)
-        scale_value = tl.load(scale_ptr + (x1 + 8 * r2), rmask & xmask, eviction_policy='evict_last', other=0.0)
-        bias_value = tl.load(bias_ptr + (x1 + 8 * r2), rmask & xmask, eviction_policy='evict_last', other=0.0)
-
-        scaled_input = input_value * scale_value
-        grad_input_diff = grad_input - scaled_input
-        grad_input_scaled = grad_input_diff * bias_value
-        broadcast_grad_input_scaled = tl.broadcast_to(grad_input_scaled, [XBLOCK, RBLOCK])
-
-        sum_grad_input += broadcast_grad_input_scaled
-        sum_grad_input = tl.where(rmask & xmask, sum_grad_input, sum_grad_input)
-
-        broadcast_scale = tl.broadcast_to(scale_value, [XBLOCK, RBLOCK])
-        sum_scale += broadcast_scale
-        sum_scale = tl.where(rmask & xmask, sum_scale, sum_scale)
-
-    total_grad_input = tl.sum(sum_grad_input, 1)[:, None]
-    total_scale = tl.sum(sum_scale, 1)[:, None]
-
-    tl.store(output_grad_ptr + (x3), total_grad_input, xmask)
-    tl.store(output_ptr + (x3), total_scale, xmask)
+        mean_value = tl.load(mean_ptr + (x1 + 8 * r2), rmask & xmask, eviction_policy='evict_last', other=0.0)
+        inv_std_value = tl.load(inv_std_ptr + (x1 + 8 * r2), rmask & xmask, eviction_policy='evict_last', other=0.0)
+        
+        normalized_input = input_value * mean_value
+        delta = grad_input - normalized_input
+        grad_mean = delta * inv_std_value
+        grad_mean_broadcast = tl.broadcast_to(grad_mean, [XBLOCK, RBLOCK])
+        
+        sum_grad_xr = sum_grad_xr + grad_mean_broadcast
+        sum_grad_xr = tl.where(rmask & xmask, sum_grad_xr, sum_grad_xr)
+        
+        input_value_broadcast = tl.broadcast_to(input_value, [XBLOCK, RBLOCK])
+        sum_input_xr = sum_input_xr + input_value_broadcast
+        sum_input_xr = tl.where(rmask & xmask, sum_input_xr, sum_input_xr)
+    
+    sum_grad_x = tl.sum(sum_grad_xr, 1)[:, None]
+    sum_input_x = tl.sum(sum_input_xr, 1)[:, None]
+    
+    tl.store(output_grad_ptr + (x3), sum_grad_x, xmask)
+    tl.store(output_ptr + (x3), sum_input_x, xmask)

@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_fill_mish_mul_sigmoid_sub_tanh_backward_0poi_fused_add_fill_mish_mul_sigmoid_sub_tanh_backward_0(
+def triton_poi_fused_add_fill_mish_mul_sigmoid_sub_tanh_backward_0(
     in_out_ptr0, in_ptr0, in_ptr1, xnumel, XBLOCK: tl.constexpr
 ):
     xoffset = tl.program_id(0) * XBLOCK
@@ -35,10 +35,9 @@ def triton_poi_fused_add_fill_mish_mul_sigmoid_sub_tanh_backward_0poi_fused_add_
 
     tanh_squared = tanh_log_grad_output * tanh_log_grad_output
     one_minus_tanh_squared = 1.0 - tanh_squared
-    grad_output_sigmoid_times_one_minus_tanh_squared = grad_output_times_sigmoid * one_minus_tanh_squared
+    grad_output_sigmoid_term = grad_output_times_sigmoid * one_minus_tanh_squared
 
-    tanh_plus_correction = tanh_log_grad_output + grad_output_sigmoid_times_one_minus_tanh_squared
-
-    final_gradient = pre_activation * tanh_plus_correction
+    mish_derivative = tanh_log_grad_output + grad_output_sigmoid_term
+    final_gradient = pre_activation * mish_derivative
 
     tl.store(in_out_ptr0 + (x0), final_gradient, xmask)

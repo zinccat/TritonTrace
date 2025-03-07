@@ -21,17 +21,17 @@ def triton_per_fused_convolution_backward_3(in_ptr0, out_ptr0, xnumel, rnumel, X
     reduction_indices = tl.arange(0, RBLOCK)[None, :]
     reduction_mask = reduction_indices < rnumel
 
-    # Calculate the indices for loading data
-    reduction_index = reduction_indices
-    input_index = input_indices
+    # Load input data with masking
+    input_data = tl.load(in_ptr0 + (input_indices + 16 * reduction_indices), reduction_mask & input_mask, other=0.0)
 
-    # Load data with masking and broadcasting
-    loaded_data = tl.load(in_ptr0 + (input_index + 16 * reduction_index), reduction_mask & input_mask, other=0.0)
-    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
+    # Broadcast loaded data to match the reduction block size
+    broadcasted_data = tl.broadcast_to(input_data, [XBLOCK, RBLOCK])
+
+    # Apply mask and zero out out-of-bound elements
     masked_data = tl.where(reduction_mask & input_mask, broadcasted_data, 0)
 
-    # Sum the data along the reduction dimension
+    # Sum along the reduction dimension
     summed_data = tl.sum(masked_data, 1)[:, None]
 
     # Store the result back to the output pointer
-    tl.store(out_ptr0 + (input_index), summed_data, input_mask)
+    tl.store(out_ptr0 + (input_indices), summed_data, input_mask)

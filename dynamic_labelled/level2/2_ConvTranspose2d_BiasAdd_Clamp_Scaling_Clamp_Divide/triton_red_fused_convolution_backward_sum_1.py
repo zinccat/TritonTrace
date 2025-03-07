@@ -7,10 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_backward_sum_1red_fused_convolution_backward_sum_1(
-    input_ptr, output_ptr0, output_ptr1, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, 
-    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
-):
+def triton_red_fused_convolution_backward_sum_1(input_ptr, output_ptr1, output_ptr2, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
     input_num_elements = 336
     input_offset = tl.program_id(0) * XBLOCK
     input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
@@ -27,23 +24,21 @@ def triton_red_fused_convolution_backward_sum_1red_fused_convolution_backward_su
         reduction_index_2 = reduction_index
         temp_index0 = reduction_index_2 + input_index_1 * ((20 + 4 * kernel_size0 * kernel_size1 * kernel_size1) // 21)
         temp_index1 = 4 * kernel_size0 * kernel_size1 * kernel_size1
-        temp_mask = temp_index0 < temp_index1
+        temp_mask2 = temp_index0 < temp_index1
         temp_load = tl.load(
             input_ptr + (
-                4 * input_index_0 * kernel_size1 * kernel_size1 + 
-                64 * kernel_size1 * kernel_size1 * (
-                    ((temp_index0 // (4 * kernel_size1 * kernel_size1)) % kernel_size0)
-                ) + 
+                4 * input_index_0 * kernel_size1 * kernel_size1 +
+                64 * kernel_size1 * kernel_size1 * (((temp_index0 // (4 * kernel_size1 * kernel_size1)) % kernel_size0)) +
                 (temp_index0 % (4 * kernel_size1 * kernel_size1))
-            ), 
-            reduction_mask & temp_mask & input_mask, 
-            eviction_policy='evict_last', 
+            ),
+            reduction_mask & temp_mask2 & input_mask,
+            eviction_policy='evict_last',
             other=0.0
         )
         temp_broadcast = tl.broadcast_to(temp_load, [XBLOCK, RBLOCK])
-        temp_sum = temp_accumulator + temp_broadcast
-        temp_accumulator = tl.where(reduction_mask & input_mask, temp_sum, temp_accumulator)
+        temp_accumulate = temp_accumulator + temp_broadcast
+        temp_accumulator = tl.where(reduction_mask & input_mask, temp_accumulate, temp_accumulator)
 
-    temp_result = tl.sum(temp_accumulator, 1)[:, None]
-    tl.store(output_ptr0 + (input_index_3), temp_result, input_mask)
-    tl.store(output_ptr1 + (input_index_3), temp_result, input_mask)
+    temp_sum = tl.sum(temp_accumulator, 1)[:, None]
+    tl.store(output_ptr1 + (input_index_3), temp_sum, input_mask)
+    tl.store(output_ptr2 + (input_index_3), temp_sum, input_mask)

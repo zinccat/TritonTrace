@@ -7,10 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_backward_4red_fused_convolution_backward_4(
-    input_ptr, output_ptr, kernel_size_z, kernel_size_y, kernel_size_x, input_num_elements, reduction_num_elements, 
-    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
-):
+def triton_red_fused_convolution_backward_4(input_ptr, output_ptr, kernel_size_z, kernel_size_y, kernel_size_x, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
     input_num_elements = 352
     input_offset = tl.program_id(0) * XBLOCK
     input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
@@ -26,127 +23,53 @@ def triton_red_fused_convolution_backward_4red_fused_convolution_backward_4(
         reduction_mask = reduction_index < reduction_num_elements
         reduction_index_2 = reduction_index
 
-        temp_index_0 = reduction_index_2 + input_index_32 * (
+        temp_index = reduction_index_2 + input_index_32 * (
             (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
              kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
              2 * kernel_size_x * kernel_size_y * kernel_size_y + 
              4 * kernel_size_y * kernel_size_x * kernel_size_x + 
              8 * kernel_size_x * kernel_size_y) // 11
         )
-        temp_index_1 = 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + \
-                       kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + \
-                       2 * kernel_size_x * kernel_size_y * kernel_size_y + \
-                       4 * kernel_size_y * kernel_size_x * kernel_size_x + \
-                       8 * kernel_size_x * kernel_size_y
-        temp_mask = temp_index_0 < temp_index_1
 
-        temp_load = tl.load(
+        temp_index_limit = 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + \
+                           kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + \
+                           2 * kernel_size_x * kernel_size_y * kernel_size_y + \
+                           4 * kernel_size_y * kernel_size_x * kernel_size_x + \
+                           8 * kernel_size_x * kernel_size_y
+
+        index_within_limit = temp_index < temp_index_limit
+
+        input_value = tl.load(
             input_ptr + (
                 2 * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // (2 + kernel_size_y)) % (2 + kernel_size_y)
-                ) + 4 * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // (4 + kernel_size_y * kernel_size_y + 4 * kernel_size_y)) % (2 + kernel_size_x)
-                ) + 8 * input_index_mod_32 + 256 * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // kernel_size_z) % kernel_size_x
-                ) + kernel_size_y * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // (2 + kernel_size_y)) % (2 + kernel_size_y)
-                ) + kernel_size_y * kernel_size_y * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // (4 + kernel_size_y * kernel_size_y + 4 * kernel_size_y)) % (2 + kernel_size_x)
-                ) + 2 * input_index_mod_32 * kernel_size_y * kernel_size_y + 4 * kernel_size_x * input_index_mod_32 + 
-                4 * kernel_size_y * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // (4 + kernel_size_y * kernel_size_y + 4 * kernel_size_y)) % (2 + kernel_size_x)
-                ) + 8 * kernel_size_y * input_index_mod_32 + 64 * kernel_size_y * kernel_size_y * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // kernel_size_z) % kernel_size_x
-                ) + 128 * kernel_size_x * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // kernel_size_z) % kernel_size_x
-                ) + 256 * kernel_size_y * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // kernel_size_z) % kernel_size_x
-                ) + kernel_size_x * input_index_mod_32 * kernel_size_y * kernel_size_y + 
-                4 * kernel_size_x * kernel_size_y * input_index_mod_32 + 32 * kernel_size_x * kernel_size_y * kernel_size_y * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // kernel_size_z) % kernel_size_x
-                ) + 128 * kernel_size_x * kernel_size_y * (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) // kernel_size_z) % kernel_size_x
-                ) + (
-                    (((reduction_index_2 + input_index_32 * (
-                        (10 + 4 * kernel_size_x * kernel_size_x + 8 * kernel_size_x + 
-                         kernel_size_x * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         2 * kernel_size_x * kernel_size_y * kernel_size_y + 
-                         4 * kernel_size_y * kernel_size_x * kernel_size_x + 
-                         8 * kernel_size_x * kernel_size_y) // 11
-                    )) % (2 + kernel_size_y))
-                )
-            ), reduction_mask & temp_mask & input_mask, eviction_policy='evict_last', other=0.0
+                    (((temp_index // (2 + kernel_size_y)) % (2 + kernel_size_y))) + 
+                    4 * (((temp_index // (4 + kernel_size_y * kernel_size_y + 4 * kernel_size_y)) % (2 + kernel_size_x))) + 
+                    8 * input_index_mod_32 + 
+                    256 * (((temp_index // kernel_size_z) % kernel_size_x)) + 
+                    kernel_size_y * (((temp_index // (2 + kernel_size_y)) % (2 + kernel_size_y))) + 
+                    kernel_size_y * kernel_size_y * (((temp_index // (4 + kernel_size_y * kernel_size_y + 4 * kernel_size_y)) % (2 + kernel_size_x))) + 
+                    2 * input_index_mod_32 * kernel_size_y * kernel_size_y + 
+                    4 * kernel_size_x * input_index_mod_32 + 
+                    4 * kernel_size_y * (((temp_index // (4 + kernel_size_y * kernel_size_y + 4 * kernel_size_y)) % (2 + kernel_size_x))) + 
+                    8 * kernel_size_y * input_index_mod_32 + 
+                    64 * kernel_size_y * kernel_size_y * (((temp_index // kernel_size_z) % kernel_size_x)) + 
+                    128 * kernel_size_x * (((temp_index // kernel_size_z) % kernel_size_x)) + 
+                    256 * kernel_size_y * (((temp_index // kernel_size_z) % kernel_size_x)) + 
+                    kernel_size_x * input_index_mod_32 * kernel_size_y * kernel_size_y + 
+                    4 * kernel_size_x * kernel_size_y * input_index_mod_32 + 
+                    32 * kernel_size_x * kernel_size_y * kernel_size_y * (((temp_index // kernel_size_z) % kernel_size_x)) + 
+                    128 * kernel_size_x * kernel_size_y * (((temp_index // kernel_size_z) % kernel_size_x)) + 
+                    (((temp_index % (2 + kernel_size_y))))
+                ), 
+                reduction_mask & index_within_limit & input_mask
+            ), 
+            eviction_policy='evict_last', 
+            other=0.0
         )
 
-        temp_broadcast = tl.broadcast_to(temp_load, [XBLOCK, RBLOCK])
-        temp_accumulator_update = temp_accumulator + temp_broadcast
+        broadcasted_input = tl.broadcast_to(input_value, [XBLOCK, RBLOCK])
+        temp_accumulator_update = temp_accumulator + broadcasted_input
         temp_accumulator = tl.where(reduction_mask & input_mask, temp_accumulator_update, temp_accumulator)
 
-    temp_sum = tl.sum(temp_accumulator, 1)[:, None]
-    tl.store(output_ptr + (input_index_3), temp_sum, input_mask)
+    reduced_sum = tl.sum(temp_accumulator, 1)[:, None]
+    tl.store(output_ptr + (input_index_3), reduced_sum, input_mask)

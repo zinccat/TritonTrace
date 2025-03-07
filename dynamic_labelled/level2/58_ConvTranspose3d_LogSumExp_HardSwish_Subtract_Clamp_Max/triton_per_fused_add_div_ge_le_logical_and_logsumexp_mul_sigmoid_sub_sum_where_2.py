@@ -7,8 +7,9 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_add_div_ge_le_logical_and_logsumexp_mul_sigmoid_sub_sum_where_2per_fused_add_div_ge_le_logical_and_logsumexp_mul_sigmoid_sub_sum_where_2(
-    input_ptr0, input_ptr1, input_ptr2, output_ptr0, kernel_size0, kernel_size1, kernel_size2, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr
+def triton_per_fused_add_div_ge_le_logical_and_logsumexp_mul_sigmoid_sub_sum_where_2(
+    input_ptr0, input_ptr1, input_ptr2, output_ptr0, kernel_size0, kernel_size1, kernel_size2, 
+    input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr
 ):
     RBLOCK: tl.constexpr = 16
     x_offset = tl.program_id(0) * XBLOCK

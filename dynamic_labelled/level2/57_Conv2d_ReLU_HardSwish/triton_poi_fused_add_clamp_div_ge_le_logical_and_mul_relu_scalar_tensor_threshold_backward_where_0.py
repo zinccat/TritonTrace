@@ -20,29 +20,43 @@ def triton_poi_fused_add_clamp_div_ge_le_logical_and_mul_relu_scalar_tensor_thre
     weight_tensor = tl.load(in_ptr0 + (x0), xmask)
 
     # Initialize constants
-    zero_int = tl.full([1], 0, tl.int32)
+    zero_int32 = tl.full([1], 0, tl.int32)
     zero_float = 0.0
     three_float = 3.0
-    one_float = 1.0
     one_sixth_float = 0.16666666666666666
+    one_float = 1.0
 
-    # Apply ReLU and HardSwish operations
-    relu_output = triton_helpers.maximum(zero_int, input_tensor)
-    is_non_positive = relu_output <= zero_float
+    # Compute maximum with zero
+    max_with_zero = triton_helpers.maximum(zero_int32, input_tensor)
 
-    hard_swish_input = relu_output + three_float
-    scaled_hard_swish_input = hard_swish_input * one_sixth_float
-    clamped_hard_swish_input = triton_helpers.maximum(scaled_hard_swish_input, zero_float)
-    min_hard_swish_input = triton_helpers.minimum(clamped_hard_swish_input, one_float)
+    # Check if max_with_zero is less than or equal to zero
+    is_less_equal_zero = max_with_zero <= zero_float
 
-    weighted_input = weight_tensor * min_hard_swish_input
-    is_in_hard_swish_range = (scaled_hard_swish_input >= zero_float) & (scaled_hard_swish_input <= one_float)
-    hard_swish_output = tl.where(is_in_hard_swish_range, weight_tensor * relu_output, zero_float)
-    scaled_hard_swish_output = hard_swish_output * one_sixth_float
+    # Compute scaled max_with_zero
+    scaled_max = max_with_zero + three_float
+    scaled_max_times_one_sixth = scaled_max * one_sixth_float
 
-    # Combine results
-    combined_output = weighted_input + scaled_hard_swish_output
-    final_output = tl.where(is_non_positive, zero_float, combined_output)
+    # Clamp scaled_max_times_one_sixth between zero and one
+    clamped_value = triton_helpers.minimum(
+        triton_helpers.maximum(scaled_max_times_one_sixth, zero_float), one_float
+    )
 
-    # Store the result back to the output tensor
-    tl.store(in_out_ptr0 + (x0), final_output, xmask)
+    # Element-wise multiplication
+    weighted_clamped_value = weight_tensor * clamped_value
+
+    # Logical conditions
+    is_scaled_max_ge_zero = scaled_max_times_one_sixth >= zero_float
+    is_scaled_max_le_one = scaled_max_times_one_sixth <= one_float
+    is_within_bounds = is_scaled_max_ge_zero & is_scaled_max_le_one
+
+    # Compute alternative value
+    weighted_input_tensor = weight_tensor * max_with_zero
+    alternative_value = tl.where(is_within_bounds, weighted_input_tensor, zero_float)
+
+    # Compute final value
+    scaled_alternative_value = alternative_value * one_sixth_float
+    final_value = weighted_clamped_value + scaled_alternative_value
+
+    # Store result
+    result = tl.where(is_less_equal_zero, zero_float, final_value)
+    tl.store(in_out_ptr0 + (x0), result, xmask)

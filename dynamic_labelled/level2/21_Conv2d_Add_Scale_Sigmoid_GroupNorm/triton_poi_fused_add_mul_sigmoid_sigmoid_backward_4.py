@@ -7,20 +7,18 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_mul_sigmoid_sigmoid_backward_4poi_fused_add_mul_sigmoid_sigmoid_backward_4(
+def triton_poi_fused_add_mul_sigmoid_sigmoid_backward_4(
     input_ptr0, input_ptr1, input_ptr2, input_ptr3, input_ptr4, input_ptr5, input_ptr6, input_ptr7, 
     output_ptr0, kernel_size0, kernel_size1, kernel_size2, kernel_size3, num_elements, XBLOCK: tl.constexpr
 ):
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
     mask = index < num_elements
-
     linear_index = index
     group_index = index // kernel_size0
     channel_index = ((index // kernel_size1) % 16)
     kernel_index = (index % kernel_size2)
-    sub_kernel_index = ((index // kernel_size2) % kernel_size2)
-
+    sub_channel_index = ((index // kernel_size2) % kernel_size2)
     batch_index = index // kernel_size1
 
     input0 = tl.load(input_ptr0 + (linear_index), mask, eviction_policy='evict_last')
@@ -29,9 +27,9 @@ def triton_poi_fused_add_mul_sigmoid_sigmoid_backward_4poi_fused_add_mul_sigmoid
     input3 = tl.load(
         input_ptr3 + (
             kernel_index + 
-            ((-2) * (((kernel_index + ((-2) * sub_kernel_index) + kernel_size3 * sub_kernel_index) // ((-2) + kernel_size3)) % ((-2) + kernel_size3))) + 
+            ((-2) * (((kernel_index + ((-2) * sub_channel_index) + kernel_size3 * sub_channel_index) // ((-2) + kernel_size3)) % ((-2) + kernel_size3))) + 
             4 * batch_index + 
-            kernel_size3 * ((((kernel_index + ((-2) * sub_kernel_index) + kernel_size3 * sub_kernel_index) // ((-2) + kernel_size3)) % ((-2) + kernel_size3))) + 
+            kernel_size3 * ((((kernel_index + ((-2) * sub_channel_index) + kernel_size3 * sub_channel_index) // ((-2) + kernel_size3)) % ((-2) + kernel_size3))) + 
             batch_index * kernel_size3 * kernel_size3 + 
             ((-4) * kernel_size3 * batch_index)
         ), 

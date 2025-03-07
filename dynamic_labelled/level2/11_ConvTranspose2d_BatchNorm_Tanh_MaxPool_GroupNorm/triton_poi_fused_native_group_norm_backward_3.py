@@ -7,46 +7,40 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_native_group_norm_backward_3poi_fused_native_group_norm_backward_3(
+def triton_poi_fused_native_group_norm_backward_3(
     in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, in_ptr4, in_ptr5, xnumel, XBLOCK: tl.constexpr
 ):
-    x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:]
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
     tl.full([XBLOCK], True, tl.int1)
     
-    x4 = x_index
-    x6 = x_index // 16384
-    x7 = ((x_index // 1024) % 64)
+    # Load input data
+    input_data = tl.load(in_ptr0 + (xindex), None)
+    scale_factor = tl.load(in_ptr1 + (xindex // 16384), None, eviction_policy='evict_last')
+    shift_factor = tl.load(in_ptr2 + ((xindex // 1024) % 64), None, eviction_policy='evict_last')
+    grad_output = tl.load(in_out_ptr0 + (xindex), None)
+    mean = tl.load(in_ptr3 + (xindex // 16384), None, eviction_policy='evict_last')
+    variance = tl.load(in_ptr4 + (xindex // 16384), None, eviction_policy='evict_last')
+    saved_variance = tl.load(in_ptr5 + (xindex // 16384), None, eviction_policy='evict_last')
     
-    input_data = tl.load(in_ptr0 + (x4), None)
-    weight_data = tl.load(in_ptr1 + (x6), None, eviction_policy='evict_last')
-    bias_data = tl.load(in_ptr2 + (x7), None, eviction_policy='evict_last')
-    
-    grad_output = tl.load(in_out_ptr0 + (x4), None)
-    running_mean = tl.load(in_ptr3 + (x6), None, eviction_policy='evict_last')
-    running_var = tl.load(in_ptr4 + (x6), None, eviction_policy='evict_last')
-    saved_mean = tl.load(in_ptr5 + (x6), None, eviction_policy='evict_last')
-    
-    weight_bias_product = weight_data * bias_data
-    input_weight_bias_product = input_data * weight_bias_product
-    
-    running_mean_var_product = running_mean * running_var
-    var_diff = running_mean_var_product - saved_mean
-    
-    var_diff_weight = var_diff * weight_data
-    var_diff_weight_cubed = var_diff_weight * var_diff_weight * var_diff_weight
-    
+    # Compute intermediate values
+    scale_shift_product = scale_factor * shift_factor
+    normalized_input = input_data * scale_shift_product
+    mean_variance_product = mean * variance
+    variance_diff = mean_variance_product - saved_variance
+    variance_diff_scaled = variance_diff * scale_factor
+    variance_diff_scaled_cubed = variance_diff_scaled * variance_diff_scaled * variance_diff_scaled
     epsilon = 6.103515625e-05
-    normalized_grad = var_diff_weight_cubed * epsilon
+    variance_diff_scaled_cubed_epsilon = variance_diff_scaled_cubed * epsilon
+    grad_input = grad_output * variance_diff_scaled_cubed_epsilon
+    grad_input_adjusted = normalized_input + grad_input
     
-    grad_input = grad_output * normalized_grad
-    adjusted_input = input_weight_bias_product + grad_input
+    # Compute final gradient
+    shift_factor_scaled = -epsilon * shift_factor
+    mean_scaled = mean * scale_factor
+    mean_scaled_epsilon = mean_scaled * epsilon
+    shift_factor_adjusted = shift_factor_scaled - mean_scaled_epsilon
+    final_grad = grad_input_adjusted + shift_factor_adjusted
     
-    bias_adjustment = -normalized_grad * running_var
-    mean_adjustment = running_mean * var_diff_weight
-    mean_adjustment_scaled = mean_adjustment * epsilon
-    
-    final_adjustment = bias_adjustment - mean_adjustment_scaled
-    adjusted_output = adjusted_input + final_adjustment
-    
-    tl.store(in_out_ptr0 + (x4), adjusted_output, None)
+    # Store the result
+    tl.store(in_out_ptr0 + (xindex), final_grad, None)

@@ -7,28 +7,33 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_max_0red_fused_max_0(in_ptr0, out_ptr0, kernel_size0, kernel_size1, xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
-    xoffset = tl.program_id(0) * XBLOCK
-    xindex = xoffset + tl.arange(0, XBLOCK)[:, None]
-    xmask = xindex < xnumel
-    rbase = tl.arange(0, RBLOCK)[None, :]
-    x1 = (xindex // kernel_size0) % 2
-    x0 = xindex % kernel_size0
-    x2 = xindex // kernel_size1
-    _max_values = tl.full([XBLOCK, RBLOCK], float("-inf"), tl.float32)
-    x4 = xindex
+def triton_red_fused_max_0(in_ptr0, out_ptr0, kernel_size0, kernel_size1, xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+    x_offset = tl.program_id(0) * XBLOCK
+    x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
+    x_mask = x_index < xnumel
+    r_base = tl.arange(0, RBLOCK)[None, :]
+    x1 = (x_index // kernel_size0) % 2
+    x0 = x_index % kernel_size0
+    x2 = x_index // kernel_size1
+    _tmp5 = tl.full([XBLOCK, RBLOCK], float("-inf"), tl.float32)
+    x4 = x_index
 
-    for roffset in range(0, rnumel, RBLOCK):
-        rindex = roffset + rbase
-        rmask = rindex < rnumel
-        r3 = rindex
+    for r_offset in range(0, rnumel, RBLOCK):
+        r_index = r_offset + r_base
+        r_mask = r_index < rnumel
+        r3 = r_index
         tmp0 = r3 + x1 * ((1 + kernel_size0) // 2)
         tmp1 = kernel_size0
         tmp2 = tmp0 < tmp1
-        tmp3 = tl.load(in_ptr0 + (x0 + kernel_size0 * r3 + x2 * kernel_size0 * kernel_size0 + kernel_size0 * x1 * ((1 + kernel_size0) // 2)), rmask & tmp2 & xmask, eviction_policy='evict_last', other=float("-inf"))
+        tmp3 = tl.load(
+            in_ptr0 + (x0 + kernel_size0 * r3 + x2 * kernel_size0 * kernel_size0 + kernel_size0 * x1 * ((1 + kernel_size0) // 2)),
+            r_mask & tmp2 & x_mask,
+            eviction_policy='evict_last',
+            other=float("-inf")
+        )
         tmp4 = tl.broadcast_to(tmp3, [XBLOCK, RBLOCK])
-        tmp6 = triton_helpers.maximum(_max_values, tmp4)
-        _max_values = tl.where(rmask & xmask, tmp6, _max_values)
+        tmp6 = triton_helpers.maximum(_tmp5, tmp4)
+        _tmp5 = tl.where(r_mask & x_mask, tmp6, _tmp5)
 
-    max_result = triton_helpers.max2(_max_values, 1)[:, None]
-    tl.store(out_ptr0 + (x4), max_result, xmask)
+    tmp5 = triton_helpers.max2(_tmp5, 1)[:, None]
+    tl.store(out_ptr0 + (x4), tmp5, x_mask)

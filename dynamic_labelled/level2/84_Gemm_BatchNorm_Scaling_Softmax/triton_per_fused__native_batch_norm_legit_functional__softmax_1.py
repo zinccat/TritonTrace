@@ -32,13 +32,15 @@ def triton_per_fused__native_batch_norm_legit_functional__softmax_1(
     scaled_data = normalized_data * variance
     scaled_data = scaled_data * gamma
     shifted_data = scaled_data + beta
+
     relu_mask = epsilon_broadcast >= 0.0
     relu_activation = tl.where(relu_mask, 1.0, -1.0)
     activated_data = shifted_data * relu_activation
-    activated_data_broadcast = tl.broadcast_to(activated_data, [RBLOCK])
 
+    activated_data_broadcast = tl.broadcast_to(activated_data, [RBLOCK])
     max_value = triton_helpers.promote_to_tensor(tl.max(activated_data_broadcast, 0))
     shifted_activated_data = activated_data - max_value
+
     relu_scaled_data = relu_activation * epsilon_broadcast
     exponentiated_data = shifted_activated_data * relu_scaled_data
     exp_data = tl.math.exp(exponentiated_data)

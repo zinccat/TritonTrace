@@ -7,28 +7,19 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_mul_native_batch_norm_backward_1(
-    input_ptr, output_ptr, num_elements_x, num_elements_r, XBLOCK: tl.constexpr
-):
-    num_elements_x = 16
-    num_elements_r = 15
+def triton_per_fused_mul_native_batch_norm_backward_1(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
+    xnumel = 16
+    rnumel = 15
     RBLOCK: tl.constexpr = 16
-
-    # Calculate offsets and indices
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < num_elements_x
-
+    x_mask = x_indices < xnumel
     r_indices = tl.arange(0, RBLOCK)[None, :]
-    r_mask = r_indices < num_elements_r
-
-    # Load and broadcast
-    loaded_values = tl.load(input_ptr + (x_indices + 16 * r_indices), r_mask & x_mask, other=0.0)
-    broadcasted_values = tl.broadcast_to(loaded_values, [XBLOCK, RBLOCK])
-
-    # Apply mask and sum
-    masked_values = tl.where(r_mask & x_mask, broadcasted_values, 0)
-    summed_values = tl.sum(masked_values, 1)[:, None]
-
-    # Store the result
-    tl.store(output_ptr + (x_indices), summed_values, x_mask)
+    r_mask = r_indices < rnumel
+    r1 = r_indices
+    x0 = x_indices
+    tmp0 = tl.load(in_ptr0 + (x0 + 16 * r1), r_mask & x_mask, other=0.0)
+    tmp1 = tl.broadcast_to(tmp0, [XBLOCK, RBLOCK])
+    tmp3 = tl.where(r_mask & x_mask, tmp1, 0)
+    tmp4 = tl.sum(tmp3, 1)[:, None]
+    tl.store(out_ptr0 + (x0), tmp4, x_mask)

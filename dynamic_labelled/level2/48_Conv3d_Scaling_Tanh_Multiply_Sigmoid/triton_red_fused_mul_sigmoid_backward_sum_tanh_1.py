@@ -14,82 +14,241 @@ def triton_red_fused_mul_sigmoid_backward_sum_tanh_1(
 ):
     xnumel = 336
     x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_index < xnumel
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
+    x_mask = x_indices < xnumel
     r_base = tl.arange(0, RBLOCK)[None, :]
-    x1 = x_index // 16
-    x0 = x_index % 16
-    _tmp17 = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    x3 = x_index
-    _tmp24 = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    x1 = x_indices // 16
+    x0 = x_indices % 16
+    temp_buffer1 = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    x3 = x_indices
+    temp_buffer2 = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
 
     for r_offset in range(0, rnumel, RBLOCK):
-        r_index = r_offset + r_base
-        r_mask = r_index < rnumel
-        r2 = r_index
+        r_indices = r_offset + r_base
+        r_mask = r_indices < rnumel
+        r2 = r_indices
+        index_offset = r2 + x1 * (
+            triton_helpers.div_floor_integer(
+                20 + ((-8) * kernel_size0) + ((-2) * kernel_size0 * kernel_size2 * kernel_size2) + 
+                4 * kernel_size0 * kernel_size1 + 8 * kernel_size0 * kernel_size2 + 
+                kernel_size0 * kernel_size1 * kernel_size2 * kernel_size2 + 
+                ((-4) * kernel_size0 * kernel_size1 * kernel_size2), 
+                21
+            )
+        )
+        index_limit = ((-8) * kernel_size0) + ((-2) * kernel_size0 * kernel_size2 * kernel_size2) + \
+                      4 * kernel_size0 * kernel_size1 + 8 * kernel_size0 * kernel_size2 + \
+                      kernel_size0 * kernel_size1 * kernel_size2 * kernel_size2 + \
+                      ((-4) * kernel_size0 * kernel_size1 * kernel_size2)
+        index_condition = index_offset < index_limit
 
-        divisor = triton_helpers.div_floor_integer(
-            20 + ((-8) * kernel_size0) + ((-2) * kernel_size0 * kernel_size2 * kernel_size2) + 
-            4 * kernel_size0 * kernel_size1 + 8 * kernel_size0 * kernel_size2 + 
-            kernel_size0 * kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size0 * kernel_size1 * kernel_size2), 
-            21
+        input_value0 = tl.load(
+            input_ptr0 + (
+                ((-128) * (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-8) * x0) + 
+                ((-2) * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2)))) + 
+                4 * (((index_offset // (4 + kernel_size2 * kernel_size2 + ((-4) * kernel_size2))) % 
+                      ((-2) + kernel_size1))) + 
+                kernel_size2 * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2))) + 
+                kernel_size2 * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1))) + 
+                ((-32) * kernel_size2 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1)))) + 
+                ((-2) * x0 * kernel_size2 * kernel_size2) + 
+                4 * kernel_size1 * x0 + 8 * kernel_size2 * x0 + 
+                64 * kernel_size1 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                128 * kernel_size2 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                kernel_size1 * x0 * kernel_size2 * kernel_size2 + 
+                ((-64) * kernel_size1 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size1 * kernel_size2 * x0) + 
+                16 * kernel_size1 * kernel_size2 * kernel_size2 * 
+                (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                (index_offset % ((-2) + kernel_size2))
+            ), 
+            r_mask & index_condition & x_mask, 
+            eviction_policy='evict_last', 
+            other=0.0
         )
 
-        tmp0 = r2 + x1 * divisor
-        tmp1 = ((-8) * kernel_size0) + ((-2) * kernel_size0 * kernel_size2 * kernel_size2) + \
-               4 * kernel_size0 * kernel_size1 + 8 * kernel_size0 * kernel_size2 + \
-               kernel_size0 * kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size0 * kernel_size1 * kernel_size2)
-        tmp2 = tmp0 < tmp1
-
-        index_expr = (
-            (-128) * (((r2 + x1 * divisor) // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
-            8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)
-            + ((-8) * x0) + ((-2) * (((r2 + x1 * divisor) // ((-2) + kernel_size2)) % ((-2) + kernel_size2)))
-            + 4 * (((r2 + x1 * divisor) // (4 + kernel_size2 * kernel_size2 + ((-4) * kernel_size2))) % ((-2) + kernel_size1))
-            + kernel_size2 * (((r2 + x1 * divisor) // ((-2) + kernel_size2)) % ((-2) + kernel_size2))
-            + kernel_size2 * kernel_size2 * (((r2 + x1 * divisor) // (4 + kernel_size2 * kernel_size2 + ((-4) * kernel_size2))) % ((-2) + kernel_size1))
-            + ((-32) * kernel_size2 * kernel_size2 * (((r2 + x1 * divisor) // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
-            8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))
-            + ((-4) * kernel_size2 * (((r2 + x1 * divisor) // (4 + kernel_size2 * kernel_size2 + ((-4) * kernel_size2))) % ((-2) + kernel_size1)))
-            + ((-2) * x0 * kernel_size2 * kernel_size2) + 4 * kernel_size1 * x0 + 8 * kernel_size2 * x0
-            + 64 * kernel_size1 * (((r2 + x1 * divisor) // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
-            8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)
-            + 128 * kernel_size2 * (((r2 + x1 * divisor) // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
-            8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)
-            + kernel_size1 * x0 * kernel_size2 * kernel_size2
-            + ((-64) * kernel_size1 * kernel_size2 * (((r2 + x1 * divisor) // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
-            8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))
-            + ((-4) * kernel_size1 * kernel_size2 * x0)
-            + 16 * kernel_size1 * kernel_size2 * kernel_size2 * (((r2 + x1 * divisor) // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
-            8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)
-            + ((r2 + x1 * divisor) % ((-2) + kernel_size2))
+        input_value1 = tl.load(
+            input_ptr1 + (
+                ((-128) * (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-8) * x0) + 
+                ((-2) * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2)))) + 
+                4 * (((index_offset // (4 + kernel_size2 * kernel_size2 + ((-4) * kernel_size2))) % 
+                      ((-2) + kernel_size1))) + 
+                kernel_size2 * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2))) + 
+                kernel_size2 * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1))) + 
+                ((-32) * kernel_size2 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1)))) + 
+                ((-2) * x0 * kernel_size2 * kernel_size2) + 
+                4 * kernel_size1 * x0 + 8 * kernel_size2 * x0 + 
+                64 * kernel_size1 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                128 * kernel_size2 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                kernel_size1 * x0 * kernel_size2 * kernel_size2 + 
+                ((-64) * kernel_size1 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size1 * kernel_size2 * x0) + 
+                16 * kernel_size1 * kernel_size2 * kernel_size2 * 
+                (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                (index_offset % ((-2) + kernel_size2))
+            ), 
+            r_mask & index_condition & x_mask, 
+            eviction_policy='evict_last', 
+            other=0.0
         )
 
-        tmp3 = tl.load(input_ptr0 + index_expr, r_mask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
-        tmp4 = tl.load(input_ptr1 + index_expr, r_mask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
-        tmp5 = 1.0
-        tmp6 = tmp5 - tmp4
-        tmp7 = tmp4 * tmp6
-        tmp8 = tmp3 * tmp7
-        tmp9 = tl.load(input_ptr2 + index_expr, r_mask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
-        tmp10 = tl.load(input_ptr3 + (tl.broadcast_to(x0, [XBLOCK, RBLOCK])), r_mask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
-        tmp11 = tmp9 * tmp10
-        tmp12 = tl.extra.cuda.libdevice.tanh(tmp11)
-        tmp13 = tmp8 * tmp12
-        tmp14 = tl.full(tmp13.shape, 0, tmp13.dtype)
-        tmp15 = tl.where(tmp2, tmp13, tmp14)
-        tmp16 = tl.broadcast_to(tmp15, [XBLOCK, RBLOCK])
-        tmp18 = _tmp17 + tmp16
-        _tmp17 = tl.where(r_mask & x_mask, tmp18, _tmp17)
-        tmp19 = tl.load(input_ptr4 + index_expr, r_mask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
-        tmp20 = tmp19 * tmp9
-        tmp21 = tl.full(tmp20.shape, 0, tmp20.dtype)
-        tmp22 = tl.where(tmp2, tmp20, tmp21)
-        tmp23 = tl.broadcast_to(tmp22, [XBLOCK, RBLOCK])
-        tmp25 = _tmp24 + tmp23
-        _tmp24 = tl.where(r_mask & x_mask, tmp25, _tmp24)
+        sigmoid_input = 1.0 - input_value1
+        sigmoid_output = input_value1 * sigmoid_input
+        masked_sigmoid_output = input_value0 * sigmoid_output
 
-    tmp17 = tl.sum(_tmp17, 1)[:, None]
-    tmp24 = tl.sum(_tmp24, 1)[:, None]
-    tl.store(output_ptr0 + (x3), tmp17, x_mask)
-    tl.store(output_ptr1 + (x3), tmp24, x_mask)
+        input_value2 = tl.load(
+            input_ptr2 + (
+                ((-128) * (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-8) * x0) + 
+                ((-2) * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2)))) + 
+                4 * (((index_offset // (4 + kernel_size2 * kernel_size2 + ((-4) * kernel_size2))) % 
+                      ((-2) + kernel_size1))) + 
+                kernel_size2 * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2))) + 
+                kernel_size2 * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1))) + 
+                ((-32) * kernel_size2 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1)))) + 
+                ((-2) * x0 * kernel_size2 * kernel_size2) + 
+                4 * kernel_size1 * x0 + 8 * kernel_size2 * x0 + 
+                64 * kernel_size1 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                128 * kernel_size2 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                kernel_size1 * x0 * kernel_size2 * kernel_size2 + 
+                ((-64) * kernel_size1 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size1 * kernel_size2 * x0) + 
+                16 * kernel_size1 * kernel_size2 * kernel_size2 * 
+                (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                (index_offset % ((-2) + kernel_size2))
+            ), 
+            r_mask & index_condition & x_mask, 
+            eviction_policy='evict_last', 
+            other=0.0
+        )
+
+        input_value3 = tl.load(
+            input_ptr3 + (tl.broadcast_to(x0, [XBLOCK, RBLOCK])), 
+            r_mask & index_condition & x_mask, 
+            eviction_policy='evict_last', 
+            other=0.0
+        )
+
+        tanh_input = input_value2 * input_value3
+        tanh_output = tl.extra.cuda.libdevice.tanh(tanh_input)
+        masked_tanh_output = masked_sigmoid_output * tanh_output
+
+        temp_result1 = tl.full(masked_tanh_output.shape, 0, masked_tanh_output.dtype)
+        conditional_result1 = tl.where(index_condition, masked_tanh_output, temp_result1)
+        broadcast_result1 = tl.broadcast_to(conditional_result1, [XBLOCK, RBLOCK])
+        temp_buffer1 += tl.where(r_mask & x_mask, broadcast_result1, temp_buffer1)
+
+        input_value4 = tl.load(
+            input_ptr4 + (
+                ((-128) * (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-8) * x0) + 
+                ((-2) * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2)))) + 
+                4 * (((index_offset // (4 + kernel_size2 * kernel_size2 + ((-4) * kernel_size2))) % 
+                      ((-2) + kernel_size1))) + 
+                kernel_size2 * (((index_offset // ((-2) + kernel_size2)) % ((-2) + kernel_size2))) + 
+                kernel_size2 * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1))) + 
+                ((-32) * kernel_size2 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size2 * (((index_offset // (4 + kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size2))) % ((-2) + kernel_size1)))) + 
+                ((-2) * x0 * kernel_size2 * kernel_size2) + 
+                4 * kernel_size1 * x0 + 8 * kernel_size2 * x0 + 
+                64 * kernel_size1 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                128 * kernel_size2 * (((index_offset // 
+                    ((-8) + ((-2) * kernel_size2 * kernel_size2) + 4 * kernel_size1 + 
+                    8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                kernel_size1 * x0 * kernel_size2 * kernel_size2 + 
+                ((-64) * kernel_size1 * kernel_size2 * 
+                 (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                     4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                     ((-4) * kernel_size1 * kernel_size2))) % kernel_size0))) + 
+                ((-4) * kernel_size1 * kernel_size2 * x0) + 
+                16 * kernel_size1 * kernel_size2 * kernel_size2 * 
+                (((index_offset // ((-8) + ((-2) * kernel_size2 * kernel_size2) + 
+                    4 * kernel_size1 + 8 * kernel_size2 + kernel_size1 * kernel_size2 * kernel_size2 + 
+                    ((-4) * kernel_size1 * kernel_size2))) % kernel_size0)) + 
+                (index_offset % ((-2) + kernel_size2))
+            ), 
+            r_mask & index_condition & x_mask, 
+            eviction_policy='evict_last', 
+            other=0.0
+        )
+
+        intermediate_result2 = input_value4 * input_value2
+        temp_result2 = tl.full(intermediate_result2.shape, 0, intermediate_result2.dtype)
+        conditional_result2 = tl.where(index_condition, intermediate_result2, temp_result2)
+        broadcast_result2 = tl.broadcast_to(conditional_result2, [XBLOCK, RBLOCK])
+        temp_buffer2 += tl.where(r_mask & x_mask, broadcast_result2, temp_buffer2)
+
+    final_result1 = tl.sum(temp_buffer1, 1)[:, None]
+    final_result2 = tl.sum(temp_buffer2, 1)[:, None]
+    tl.store(output_ptr0 + (x3), final_result1, x_mask)
+    tl.store(output_ptr1 + (x3), final_result2, x_mask)

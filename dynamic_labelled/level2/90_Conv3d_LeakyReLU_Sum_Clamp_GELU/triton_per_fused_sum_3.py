@@ -7,24 +7,33 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_sum_3per_fused_sum_3(input_ptr, output_ptr, num_elements_x, num_elements_r, XBLOCK: tl.constexpr):
-    num_elements_x = 16
-    num_elements_r = 21
+def triton_per_fused_sum_3(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
+    xnumel = 16
+    rnumel = 21
     RBLOCK: tl.constexpr = 32
-
-    x_offset = tl.program_id(0) * XBLOCK
-    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < num_elements_x
-
+    
+    # Calculate the starting index for the current block
+    x_start_index = tl.program_id(0) * XBLOCK
+    x_indices = x_start_index + tl.arange(0, XBLOCK)[:, None]
+    
+    # Create a mask to ensure indices are within bounds
+    x_within_bounds = x_indices < xnumel
     r_indices = tl.arange(0, RBLOCK)[None, :]
-    r_mask = r_indices < num_elements_r
-
-    r1 = r_indices
-    x0 = x_indices
-
-    tmp0 = tl.load(input_ptr + (x0 + 16 * r1), r_mask & x_mask, other=0.0)
-    tmp1 = tl.broadcast_to(tmp0, [XBLOCK, RBLOCK])
-    tmp3 = tl.where(r_mask & x_mask, tmp1, 0)
-    tmp4 = tl.sum(tmp3, 1)[:, None]
-
-    tl.store(output_ptr + (x0), tmp4, x_mask)
+    r_within_bounds = r_indices < rnumel
+    
+    # Load data from input pointer with masking
+    input_indices = x_indices + 16 * r_indices
+    load_mask = r_within_bounds & x_within_bounds
+    loaded_data = tl.load(in_ptr0 + input_indices, load_mask, other=0.0)
+    
+    # Broadcast loaded data to the required shape
+    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
+    
+    # Apply mask and zero out out-of-bounds elements
+    masked_data = tl.where(load_mask, broadcasted_data, 0)
+    
+    # Sum along the second dimension and reshape
+    summed_data = tl.sum(masked_data, 1)[:, None]
+    
+    # Store the result back to the output pointer
+    tl.store(out_ptr0 + x_indices, summed_data, x_within_bounds)

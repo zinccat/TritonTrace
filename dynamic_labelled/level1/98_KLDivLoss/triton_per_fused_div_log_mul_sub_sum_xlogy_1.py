@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_div_log_mul_sub_sum_xlogy_1per_fused_div_log_mul_sub_sum_xlogy_1(in_out_ptr0, in_ptr0, ks0, xnumel, rnumel, XBLOCK: tl.constexpr):
+def triton_per_fused_div_log_mul_sub_sum_xlogy_1(in_out_ptr0, in_ptr0, ks0, xnumel, rnumel, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 64
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
@@ -23,7 +23,7 @@ def triton_per_fused_div_log_mul_sub_sum_xlogy_1per_fused_div_log_mul_sub_sum_xl
     # Convert ks0 to float32
     ks_float = ks0.to(tl.float32)
     
-    # Perform division
+    # Compute division
     result = summed_data / ks_float
     
     # Synchronize threads

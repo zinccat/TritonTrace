@@ -9,8 +9,8 @@ triton_helpers.set_driver_to_gpu()
 @triton.jit
 def triton_per_fused__native_batch_norm_legit_functional_native_group_norm_1(
     input_ptr_mean, input_ptr_var, input_ptr_beta, input_ptr_gamma, input_ptr_bias,
-    output_ptr_mean, output_ptr_var, output_ptr_beta, output_ptr_gamma,
-    num_elements, reduction_elements, XBLOCK: tl.constexpr
+    output_ptr_mean, output_ptr_var, output_ptr_beta, output_ptr_gamma, 
+    num_elements, num_reduction_elements, XBLOCK: tl.constexpr
 ):
     RBLOCK: tl.constexpr = 128
     x_offset = tl.program_id(0) * XBLOCK
@@ -57,9 +57,9 @@ def triton_per_fused__native_batch_norm_legit_functional_native_group_norm_1(
     variance = sum_squared / 128.0
     epsilon = 1e-05
     variance_adjusted = variance + epsilon
-    inv_stddev = tl.extra.cuda.libdevice.rsqrt(variance_adjusted)
+    inv_sqrt_variance = tl.extra.cuda.libdevice.rsqrt(variance_adjusted)
     
     tl.store(output_ptr_mean + (r2 + 128 * x3), biased, x_mask)
-    tl.store(output_ptr_gamma + (x3), inv_stddev, x_mask)
-    tl.store(output_ptr_beta + (x3), mean_gelu, x_mask)
-    tl.store(output_ptr_var + (x3), sum_squared, x_mask)
+    tl.store(output_ptr_gamma, inv_sqrt_variance, x_mask)
+    tl.store(output_ptr_beta, mean_gelu, x_mask)
+    tl.store(output_ptr_var, sum_squared, x_mask)

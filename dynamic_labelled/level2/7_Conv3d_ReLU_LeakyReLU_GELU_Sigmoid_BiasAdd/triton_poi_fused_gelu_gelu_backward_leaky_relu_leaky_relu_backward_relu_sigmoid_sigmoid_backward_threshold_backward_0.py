@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_gelu_gelu_backward_leaky_relu_leaky_relu_backward_relu_sigmoid_sigmoid_backward_threshold_backward_0poi_fused_gelu_gelu_backward_leaky_relu_leaky_relu_backward_relu_sigmoid_sigmoid_backward_threshold_backward_0(
+def triton_poi_fused_gelu_gelu_backward_leaky_relu_leaky_relu_backward_relu_sigmoid_sigmoid_backward_threshold_backward_0(
     in_out_ptr1, in_ptr0, xnumel, XBLOCK: tl.constexpr
 ):
     xoffset = tl.program_id(0) * XBLOCK
@@ -15,54 +15,38 @@ def triton_poi_fused_gelu_gelu_backward_leaky_relu_leaky_relu_backward_relu_sigm
     xmask = xindex < xnumel
     x0 = xindex
 
-    input_value = tl.load(in_ptr0 + (x0), xmask)
+    input_data = tl.load(in_ptr0 + (x0), xmask)
     grad_output = tl.load(in_out_ptr1 + (x0), xmask)
 
     zero_int32 = tl.full([1], 0, tl.int32)
-    max_with_zero = triton_helpers.maximum(zero_int32, grad_output)
+    max_input_grad = triton_helpers.maximum(zero_int32, grad_output)
 
     zero_float = 0.0
-    is_positive = max_with_zero > zero_float
+    is_positive = max_input_grad > zero_float
 
     leaky_relu_slope = 0.01
-    leaky_relu_output = tl.where(is_positive, max_with_zero, max_with_zero * leaky_relu_slope)
+    leaky_relu_output = tl.where(is_positive, max_input_grad, max_input_grad * leaky_relu_slope)
 
     gelu_coefficient = 0.5
-    scaled_leaky_relu = leaky_relu_output * gelu_coefficient
+    gelu_scaled_input = leaky_relu_output * gelu_coefficient
 
     erf_coefficient = 0.7071067811865476
-    erf_input = leaky_relu_output * erf_coefficient
-    erf_result = tl.extra.cuda.libdevice.erf(erf_input)
+    erf_argument = leaky_relu_output * erf_coefficient
 
-    one_float = 1.0
-    erf_adjusted = erf_result + one_float
+    erf_result = tl.extra.cuda.libdevice.erf(erf_argument)
+    erf_scaled_result = gelu_scaled_input * (erf_result + 1.0)
 
-    gelu_intermediate = scaled_leaky_relu * erf_adjusted
-    sigmoid_input = tl.sigmoid(gelu_intermediate)
+    sigmoid_input = erf_scaled_result
+    sigmoid_result = tl.sigmoid(sigmoid_input)
+    sigmoid_derivative = sigmoid_result * (1.0 - sigmoid_result)
 
-    sigmoid_derivative = one_float - sigmoid_input
-    sigmoid_gradient = sigmoid_input * sigmoid_derivative
+    gelu_derivative = input_data * sigmoid_derivative
 
-    input_gradient = input_value * sigmoid_gradient
+    gelu_correction_term = gelu_scaled_input * (0.5 + leaky_relu_output * 0.3989422804014327 * tl.math.exp(-0.5 * leaky_relu_output * leaky_relu_output))
 
-    gelu_derivative = erf_adjusted * gelu_coefficient
-    squared_leaky_relu = leaky_relu_output * leaky_relu_output
+    grad_input = gelu_derivative * gelu_correction_term
+    grad_input_leaky_relu = tl.where(is_positive, grad_input, grad_input * leaky_relu_slope)
 
-    exp_coefficient = -0.5
-    exp_input = squared_leaky_relu * exp_coefficient
-    exp_result = tl.math.exp(exp_input)
+    grad_output_updated = tl.where(max_input_grad <= zero_float, zero_float, grad_input_leaky_relu)
 
-    normal_dist_coefficient = 0.3989422804014327
-    normal_dist = exp_result * normal_dist_coefficient
-
-    gelu_derivative_adjusted = gelu_derivative + (leaky_relu_output * normal_dist)
-
-    input_gradient_adjusted = input_gradient * gelu_derivative_adjusted
-
-    leaky_relu_gradient = input_gradient_adjusted * leaky_relu_slope
-    final_gradient = tl.where(is_positive, input_gradient_adjusted, leaky_relu_gradient)
-
-    is_non_positive = max_with_zero <= zero_float
-    output_gradient = tl.where(is_non_positive, zero_float, final_gradient)
-
-    tl.store(in_out_ptr1 + (x0), output_gradient, xmask)
+    tl.store(in_out_ptr1 + (x0), grad_output_updated, xmask)

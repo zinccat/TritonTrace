@@ -16,42 +16,44 @@ def triton_per_fused_convolution_gelu_mul_native_layer_norm_0(
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
     r_index = tl.arange(0, RBLOCK)[None, :]
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
-    r_block = r_index
-    x_block = x_index
-    x_channel = ((x_index // kernel_size) % 64)
+    r3 = r_index
+    x4 = x_index
+    x1 = ((x_index // kernel_size) % 64)
     
-    input_value0 = tl.load(in_out_ptr0 + (r_block + 64 * x_block), None)
-    input_value1 = tl.load(in_ptr0 + (x_channel), None, eviction_policy='evict_last')
-    input_value2 = tl.load(in_ptr1 + (r_block), None, eviction_policy='evict_last')
-    input_value3 = tl.load(in_ptr2 + (r_block), None, eviction_policy='evict_last')
+    # Load data
+    input_data = tl.load(in_out_ptr0 + (r3 + 64 * x4), None)
+    kernel_data = tl.load(in_ptr0 + (x1), None, eviction_policy='evict_last')
+    layer_norm_data1 = tl.load(in_ptr1 + (r3), None, eviction_policy='evict_last')
+    layer_norm_data2 = tl.load(in_ptr2 + (r3), None, eviction_policy='evict_last')
     
-    sum_value = input_value0 + input_value1
-    broadcast_sum = tl.broadcast_to(sum_value, [XBLOCK, RBLOCK])
-    sum_across_r = tl.sum(broadcast_sum, 1)[:, None]
-    num_elements = tl.full([XBLOCK, 1], 64, tl.int32).to(tl.float32)
-    mean_value = sum_across_r / num_elements
-    
-    centered_value = broadcast_sum - mean_value
-    squared_value = centered_value * centered_value
-    broadcast_squared = tl.broadcast_to(squared_value, [XBLOCK, RBLOCK])
+    # Compute intermediate values
+    sum_data = input_data + kernel_data
+    broadcast_sum = tl.broadcast_to(sum_data, [XBLOCK, RBLOCK])
+    sum_over_rblock = tl.sum(broadcast_sum, 1)[:, None]
+    mean = sum_over_rblock / tl.full([XBLOCK, 1], 64, tl.int32).to(tl.float32)
+    centered_data = broadcast_sum - mean
+    squared_data = centered_data * centered_data
+    broadcast_squared = tl.broadcast_to(squared_data, [XBLOCK, RBLOCK])
     sum_squared = tl.sum(broadcast_squared, 1)[:, None]
     variance = sum_squared / 64.0
     epsilon = 1e-05
     variance_with_epsilon = variance + epsilon
     inv_stddev = tl.extra.cuda.libdevice.rsqrt(variance_with_epsilon)
+    normalized_data = centered_data * inv_stddev
     
-    normalized_value = centered_value * inv_stddev
-    scaled_value = normalized_value * input_value2
-    layer_norm_output = scaled_value + input_value3
+    # Apply layer normalization
+    layer_norm_output = normalized_data * layer_norm_data1 + layer_norm_data2
     
-    gelu_input = layer_norm_output * 0.5
+    # Apply GELU activation
+    half = 0.5
     sqrt_2_over_pi = 0.7071067811865476
-    erf_input = layer_norm_output * sqrt_2_over_pi
-    erf_output = tl.extra.cuda.libdevice.erf(erf_input)
-    gelu_output = gelu_input * (erf_output + 1.0) * 1.0
+    gelu_input = layer_norm_output * sqrt_2_over_pi
+    erf_result = tl.extra.cuda.libdevice.erf(gelu_input)
+    gelu_output = half * layer_norm_output * (erf_result + 1.0)
     
-    tl.store(in_out_ptr0 + (r_block + 64 * x_block), sum_value, None)
+    # Store results
+    tl.store(in_out_ptr0 + (r3 + 64 * x4), input_data, None)
     tl.debug_barrier()
-    tl.store(in_out_ptr1 + (x_block), inv_stddev, None)
-    tl.store(in_out_ptr2 + (r_block + 64 * x_block), gelu_output, None)
-    tl.store(out_ptr0 + (x_block), mean_value, None)
+    tl.store(in_out_ptr1 + (x4), inv_stddev, None)
+    tl.store(in_out_ptr2 + (r3 + 64 * x4), gelu_output, None)
+    tl.store(out_ptr0 + (x4), mean, None)

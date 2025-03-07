@@ -8,7 +8,7 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_red_fused_native_group_norm_backward_2(
-    input_grad_ptr, input_ptr, mean_ptr, inv_std_ptr, output_grad_ptr0, output_grad_ptr1, 
+    input_grad_ptr, input_ptr, mean_ptr, inv_std_ptr, output_grad_ptr, output_ptr, 
     xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
     xnumel = 64
@@ -31,19 +31,21 @@ def triton_red_fused_native_group_norm_backward_2(
         inv_std = tl.load(inv_std_ptr + (x1 + 4 * r2), rmask & xmask, eviction_policy='evict_last', other=0.0)
         
         normalized_input = input - mean
-        grad_normalized_input = grad_input * inv_std
-        grad_input_scaled = grad_normalized_input * inv_std
-        grad_input_scaled_broadcast = tl.broadcast_to(grad_input_scaled, [XBLOCK, RBLOCK])
+        scaled_grad_input = normalized_input * inv_std
+        grad_input_scaled = grad_input * inv_std
         
-        sum_grad_input = sum_grad_input + grad_input_scaled_broadcast
+        grad_input_contribution = scaled_grad_input * grad_input
+        grad_input_contribution_broadcast = tl.broadcast_to(grad_input_contribution, [XBLOCK, RBLOCK])
+        
+        sum_grad_input += grad_input_contribution_broadcast
         sum_grad_input = tl.where(rmask & xmask, sum_grad_input, sum_grad_input)
         
-        input_broadcast = tl.broadcast_to(input, [XBLOCK, RBLOCK])
-        sum_input = sum_input + input_broadcast
+        input_broadcast = tl.broadcast_to(grad_input, [XBLOCK, RBLOCK])
+        sum_input += input_broadcast
         sum_input = tl.where(rmask & xmask, sum_input, sum_input)
     
     sum_grad_input_over_r = tl.sum(sum_grad_input, 1)[:, None]
     sum_input_over_r = tl.sum(sum_input, 1)[:, None]
     
-    tl.store(output_grad_ptr0 + (x3), sum_grad_input_over_r, xmask)
-    tl.store(output_grad_ptr1 + (x3), sum_input_over_r, xmask)
+    tl.store(output_grad_ptr + (x3), sum_grad_input_over_r, xmask)
+    tl.store(output_ptr + (x3), sum_input_over_r, xmask)

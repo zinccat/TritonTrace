@@ -7,43 +7,43 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_native_group_norm_1poi_fused_native_group_norm_1(
-    input_ptr0, input_ptr1, input_ptr2, input_ptr3, input_ptr4, input_ptr5, 
-    output_ptr0, num_elements, XBLOCK: tl.constexpr
+def triton_poi_fused_native_group_norm_1(
+    input_ptr_mean, input_ptr_var, input_ptr_bn_mean, input_ptr_bn_var, input_ptr_bn_weight, input_ptr_bn_bias, 
+    output_ptr, num_elements, XBLOCK: tl.constexpr
 ):
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
     mask = index < num_elements
-    index2 = index
-    index0 = index % 1024
+    element_index = index
+    block_index = index % 1024
 
-    input_val0 = tl.load(input_ptr0 + (index2), mask)
-    input_val1 = tl.load(input_ptr1 + (index0), mask, eviction_policy='evict_last')
-    input_val2 = tl.load(input_ptr2 + (index2 // 32), mask, eviction_policy='evict_last')
-    input_val3 = tl.load(input_ptr3 + (index2 // 32), mask, eviction_policy='evict_last')
-    input_val4 = tl.load(input_ptr4 + (index0), mask, eviction_policy='evict_last')
-    input_val5 = tl.load(input_ptr5 + (index0), mask, eviction_policy='evict_last')
+    mean = tl.load(input_ptr_mean + (element_index), mask)
+    var = tl.load(input_ptr_var + (block_index), mask, eviction_policy='evict_last')
+    bn_mean = tl.load(input_ptr_bn_mean + (element_index // 32), mask, eviction_policy='evict_last')
+    bn_var = tl.load(input_ptr_bn_var + (element_index // 32), mask, eviction_policy='evict_last')
+    bn_weight = tl.load(input_ptr_bn_weight + (block_index), mask, eviction_policy='evict_last')
+    bn_bias = tl.load(input_ptr_bn_bias + (block_index), mask, eviction_policy='evict_last')
 
-    sum_input = input_val0 + input_val1
-    min_value = -1.0
-    max_clamped = triton_helpers.maximum(sum_input, min_value)
-    max_value = 1.0
-    clamped_value = triton_helpers.minimum(max_clamped, max_value)
-    threshold = 20.0
-    is_greater_than_threshold = clamped_value > threshold
-    exp_value = tl.math.exp(clamped_value)
-    log1p_value = tl.extra.cuda.libdevice.log1p(exp_value)
-    tanh_input = tl.where(is_greater_than_threshold, clamped_value, log1p_value)
-    tanh_value = tl.extra.cuda.libdevice.tanh(tanh_input)
-    mish_output = clamped_value * tanh_value
+    normalized = mean + var
+    relu_min = -1.0
+    relu_max = 1.0
+    relu_clipped = triton_helpers.maximum(normalized, relu_min)
+    relu_clipped = triton_helpers.minimum(relu_clipped, relu_max)
 
-    normalized_value = mish_output - input_val2
-    scale_factor = 32.0
-    scaled_value = input_val3 / scale_factor
+    mish_threshold = 20.0
+    mish_exceeds_threshold = relu_clipped > mish_threshold
+    exp_relu_clipped = tl.math.exp(relu_clipped)
+    log1p_exp_relu_clipped = tl.extra.cuda.libdevice.log1p(exp_relu_clipped)
+    mish_activation = tl.where(mish_exceeds_threshold, relu_clipped, log1p_exp_relu_clipped)
+    tanh_mish = tl.extra.cuda.libdevice.tanh(mish_activation)
+    mish_output = relu_clipped * tanh_mish
+
+    normalized_output = mish_output - bn_mean
+    bn_var_scaled = bn_var / 32.0
     epsilon = 1e-05
-    adjusted_value = scaled_value + epsilon
-    reciprocal_sqrt = tl.extra.cuda.libdevice.rsqrt(adjusted_value)
-    scaled_normalized = normalized_value * reciprocal_sqrt
-    final_output = scaled_normalized * input_val4 + input_val5
+    variance_inverse_sqrt = tl.extra.cuda.libdevice.rsqrt(bn_var_scaled + epsilon)
+    normalized_scaled = normalized_output * variance_inverse_sqrt
+    scaled_output = normalized_scaled * bn_weight
+    final_output = scaled_output + bn_bias
 
-    tl.store(output_ptr0 + (index2), final_output, mask)
+    tl.store(output_ptr + (element_index), final_output, mask)

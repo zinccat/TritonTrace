@@ -7,33 +7,28 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused__softmax__softmax_backward_data_2poi_fused__softmax__softmax_backward_data_2(
-    in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, kernel_size0, kernel_size1, kernel_size2, xnumel, XBLOCK: tl.constexpr
+def triton_poi_fused__softmax__softmax_backward_data_2(
+    in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, kernel_size0, kernel_size1, kernel_size2, 
+    xnumel, XBLOCK: tl.constexpr
 ):
-    xoffset = tl.program_id(0) * XBLOCK
-    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    x_offset = tl.program_id(0) * XBLOCK
+    x_index = x_offset + tl.arange(0, XBLOCK)[:]
     tl.full([XBLOCK], True, tl.int1)
     
-    # Calculate indices
-    batch_index = xindex
-    kernel_index0 = xindex % kernel_size0
-    kernel_index2 = xindex // kernel_size1
+    x3 = x_index
+    x0 = (x_index % kernel_size0)
+    x2 = x_index // kernel_size1
     
-    # Load data
-    output_value = tl.load(in_out_ptr0 + (batch_index), None, eviction_policy='evict_last')
-    input_value0 = tl.load(in_ptr0 + (kernel_index0 + 8192 * kernel_size2 * kernel_index2), None, eviction_policy='evict_last')
-    input_value1 = tl.load(in_ptr1 + (kernel_index0 + 8192 * kernel_size2 * kernel_index2), None, eviction_policy='evict_last')
-    input_value2 = tl.load(in_ptr2 + (kernel_index0 + 8192 * kernel_size2 * kernel_index2), None, eviction_policy='evict_last')
-    input_value3 = tl.load(in_ptr3 + (batch_index), None, eviction_policy='evict_last')
+    input_value = tl.load(in_out_ptr0 + (x3), None, eviction_policy='evict_last')
+    input_max = tl.load(in_ptr0 + (x0 + 8192 * kernel_size2 * x2), None, eviction_policy='evict_last')
+    sum_exp = tl.load(in_ptr1 + (x0 + 8192 * kernel_size2 * x2), None, eviction_policy='evict_last')
+    grad_output = tl.load(in_ptr2 + (x0 + 8192 * kernel_size2 * x2), None, eviction_policy='evict_last')
+    output_value = tl.load(in_ptr3 + (x3), None, eviction_policy='evict_last')
     
-    # Compute intermediate values
-    diff = output_value - input_value0
-    exp_diff = tl.math.exp(diff)
-    softmax_output = exp_diff / input_value1
-    neg_softmax_output = -softmax_output
+    shifted_input = input_value - input_max
+    exp_input = tl.math.exp(shifted_input)
+    softmax_output = exp_input / sum_exp
+    neg_softmax_grad = -softmax_output
     
-    # Compute final result
-    fused_result = tl.extra.cuda.libdevice.fma(neg_softmax_output, input_value2, input_value3)
-    
-    # Store result
-    tl.store(in_out_ptr0 + (batch_index), fused_result, None)
+    updated_output = tl.extra.cuda.libdevice.fma(neg_softmax_grad, grad_output, output_value)
+    tl.store(in_out_ptr0 + (x3), updated_output, None)

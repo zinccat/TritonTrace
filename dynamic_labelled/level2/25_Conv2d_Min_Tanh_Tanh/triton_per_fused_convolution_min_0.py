@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_convolution_min_0per_fused_convolution_min_0(in_ptr0, in_ptr1, out_ptr0, out_ptr1, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr):
+def triton_per_fused_convolution_min_0(in_ptr0, in_ptr1, out_ptr0, out_ptr1, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 16
     x_offset = tl.program_id(0) * XBLOCK
     x_index = x_offset + tl.arange(0, XBLOCK)[:, None]

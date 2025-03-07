@@ -8,7 +8,7 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_per_fused_native_group_norm_backward_1(
-    input_grad_ptr, input_ptr, running_mean_ptr, output_grad_ptr, output_ptr, 
+    input_grad_ptr, input_ptr, running_var_ptr, output_grad_ptr, output_ptr, 
     xnumel, rnumel, XBLOCK: tl.constexpr
 ):
     RBLOCK: tl.constexpr = 16
@@ -23,17 +23,17 @@ def triton_per_fused_native_group_norm_backward_1(
 
     input_grad = tl.load(input_grad_ptr + (r_block_index + 16 * x_block_index), xmask, other=0.0)
     input = tl.load(input_ptr + (r_block_index + 16 * x_channel_index), xmask, eviction_policy='evict_last', other=0.0)
-    running_mean = tl.load(running_mean_ptr + (r_block_index + 16 * x_block_index), xmask, other=0.0)
+    running_var = tl.load(running_var_ptr + (r_block_index + 16 * x_block_index), xmask, other=0.0)
 
     grad_input_product = input_grad * input
     broadcast_grad_input_product = tl.broadcast_to(grad_input_product, [XBLOCK, RBLOCK])
     masked_grad_input_product = tl.where(xmask, broadcast_grad_input_product, 0)
     sum_grad_input_product = tl.sum(masked_grad_input_product, 1)[:, None]
 
-    running_mean_product = running_mean * input
-    broadcast_running_mean_product = tl.broadcast_to(running_mean_product, [XBLOCK, RBLOCK])
-    masked_running_mean_product = tl.where(xmask, broadcast_running_mean_product, 0)
-    sum_running_mean_product = tl.sum(masked_running_mean_product, 1)[:, None]
+    grad_running_var_product = running_var * input
+    broadcast_grad_running_var_product = tl.broadcast_to(grad_running_var_product, [XBLOCK, RBLOCK])
+    masked_grad_running_var_product = tl.where(xmask, broadcast_grad_running_var_product, 0)
+    sum_grad_running_var_product = tl.sum(masked_grad_running_var_product, 1)[:, None]
 
     tl.store(output_grad_ptr + (x_block_index), sum_grad_input_product, xmask)
-    tl.store(output_ptr + (x_block_index), sum_running_mean_product, xmask)
+    tl.store(output_ptr + (x_block_index), sum_grad_running_var_product, xmask)

@@ -7,47 +7,52 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_logsumexp_max_mean_sum_0poi_fused_logsumexp_max_mean_sum_0(in_ptr0, out_ptr0, out_ptr1, xnumel, XBLOCK: tl.constexpr):
-    xoffset = tl.program_id(0) * XBLOCK
-    xindex = xoffset + tl.arange(0, XBLOCK)[:]
-    xmask = xindex < xnumel
-    x0 = xindex
+def triton_poi_fused_logsumexp_max_mean_sum_0(input_ptr, output_sum_ptr, output_logsumexp_ptr, num_elements, BLOCK_SIZE : tl.constexpr):
+    block_offset = tl.program_id(0) * BLOCK_SIZE
+    indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
+    mask = indices < num_elements
+    base_indices = indices
 
-    # Load input data with eviction policy
-    input0 = tl.load(in_ptr0 + (5 * x0), xmask, eviction_policy='evict_last')
-    input1 = tl.load(in_ptr0 + (1 + 5 * x0), xmask, eviction_policy='evict_last')
-    input2 = tl.load(in_ptr0 + (2 + 5 * x0), xmask, eviction_policy='evict_last')
-    input3 = tl.load(in_ptr0 + (3 + 5 * x0), xmask, eviction_policy='evict_last')
-    input4 = tl.load(in_ptr0 + (4 + 5 * x0), xmask, eviction_policy='evict_last')
+    # Load elements with eviction policy
+    element_0 = tl.load(input_ptr + (5 * base_indices), mask, eviction_policy='evict_last')
+    element_1 = tl.load(input_ptr + (1 + 5 * base_indices), mask, eviction_policy='evict_last')
+    element_2 = tl.load(input_ptr + (2 + 5 * base_indices), mask, eviction_policy='evict_last')
+    element_3 = tl.load(input_ptr + (3 + 5 * base_indices), mask, eviction_policy='evict_last')
+    element_4 = tl.load(input_ptr + (4 + 5 * base_indices), mask, eviction_policy='evict_last')
 
     # Compute sum
-    sum_result = input0 + input1 + input2 + input3 + input4
+    sum_01 = element_0 + element_1
+    sum_012 = sum_01 + element_2
+    sum_0123 = sum_012 + element_3
+    sum_01234 = sum_0123 + element_4
 
     # Compute mean
-    mean_result = sum_result / 1.0
+    divisor = 1.0
+    mean_value = sum_01234 / divisor
 
     # Compute max
-    abs_mean = tl.math.abs(mean_result)
-    max_value = float("inf")
-    is_max = abs_mean == max_value
-    max_result = tl.where(is_max, 0.0, mean_result)
+    abs_mean = tl.math.abs(mean_value)
+    inf_value = float("inf")
+    is_inf = abs_mean == inf_value
+    max_value = tl.where(is_inf, 0.0, mean_value)
 
     # Compute logsumexp
-    adjusted_mean = mean_result - max_result
+    adjusted_mean = mean_value - max_value
     exp_adjusted_mean = tl.math.exp(adjusted_mean)
     log_exp_adjusted_mean = tl.math.log(exp_adjusted_mean)
-    logsumexp_result = log_exp_adjusted_mean + max_result
+    logsumexp_value = log_exp_adjusted_mean + max_value
 
     # Compute max of logsumexp
-    abs_logsumexp = tl.math.abs(logsumexp_result)
-    is_max_logsumexp = abs_logsumexp == max_value
-    max_logsumexp_result = tl.where(is_max_logsumexp, 0.0, logsumexp_result)
+    abs_logsumexp = tl.math.abs(logsumexp_value)
+    is_inf_logsumexp = abs_logsumexp == inf_value
+    max_logsumexp = tl.where(is_inf_logsumexp, 0.0, logsumexp_value)
 
     # Final logsumexp adjustment
-    adjusted_logsumexp = logsumexp_result - max_logsumexp_result
+    adjusted_logsumexp = logsumexp_value - max_logsumexp
     exp_adjusted_logsumexp = tl.math.exp(adjusted_logsumexp)
-    final_logsumexp = tl.math.log(exp_adjusted_logsumexp) + max_logsumexp_result
+    log_exp_adjusted_logsumexp = tl.math.log(exp_adjusted_logsumexp)
+    final_logsumexp = log_exp_adjusted_logsumexp + max_logsumexp
 
     # Store results
-    tl.store(out_ptr0 + (x0), sum_result, xmask)
-    tl.store(out_ptr1 + (x0), final_logsumexp, xmask)
+    tl.store(output_sum_ptr + (base_indices), sum_01234, mask)
+    tl.store(output_logsumexp_ptr + (base_indices), final_logsumexp, mask)

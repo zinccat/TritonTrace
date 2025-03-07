@@ -17,43 +17,55 @@ def triton_per_fused_add_clamp_div_logsumexp_max_mul_sigmoid_sub_2(
     rindex = tl.arange(0, RBLOCK)[None, :]
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
     
-    input_indices = xindex
-    reduction_indices = rindex
+    # Load data
+    input_data = tl.load(in_out_ptr0 + (xindex), xmask, eviction_policy='evict_last')
+    input_data0 = tl.load(in_ptr0 + (xindex), xmask, eviction_policy='evict_last')
+    input_data1 = tl.load(in_ptr1 + (rindex), None, eviction_policy='evict_last')
     
-    loaded_in_out = tl.load(in_out_ptr0 + (input_indices), xmask, eviction_policy='evict_last')
-    loaded_in0 = tl.load(in_ptr0 + (input_indices), xmask, eviction_policy='evict_last')
-    loaded_in1 = tl.load(in_ptr1 + (reduction_indices), None, eviction_policy='evict_last')
+    # Compute log
+    log_input_data = tl.math.log(input_data)
     
-    log_loaded_in_out = tl.math.log(loaded_in_out)
-    abs_loaded_in0 = tl.math.abs(loaded_in0)
+    # Compute absolute value
+    abs_input_data0 = tl.math.abs(input_data0)
+    
+    # Handle infinities
     inf_value = float("inf")
-    is_inf = abs_loaded_in0 == inf_value
+    is_inf = abs_input_data0 == inf_value
     zero_value = 0.0
-    clamped_in0 = tl.where(is_inf, zero_value, loaded_in0)
+    adjusted_input_data0 = tl.where(is_inf, zero_value, input_data0)
     
-    log_plus_clamped = log_loaded_in_out + clamped_in0
-    bias = 3.0
-    biased_log = log_plus_clamped + bias
-    sigmoid_result = tl.sigmoid(biased_log)
-    log_times_sigmoid = log_plus_clamped * sigmoid_result
-    scaling_factor = 0.16666666666666666
-    scaled_result = log_times_sigmoid * scaling_factor
+    # Add log and adjusted input
+    log_plus_adjusted = log_input_data + adjusted_input_data0
     
-    subtracted_result = scaled_result - loaded_in1
-    clamp_min = -1.0
-    clamped_result = triton_helpers.maximum(subtracted_result, clamp_min)
-    clamp_max = 1.0
-    clamped_and_bounded = triton_helpers.minimum(clamped_result, clamp_max)
+    # Sigmoid computation
+    sigmoid_offset = 3.0
+    sigmoid_input = log_plus_adjusted + sigmoid_offset
+    sigmoid_output = tl.sigmoid(sigmoid_input)
     
-    broadcast_clamped = tl.broadcast_to(clamped_and_bounded, [XBLOCK, RBLOCK])
+    # Element-wise multiplication
+    elementwise_product = log_plus_adjusted * sigmoid_output
+    
+    # Scale by constant
+    scale_factor = 0.16666666666666666
+    scaled_product = elementwise_product * scale_factor
+    
+    # Subtract input_data1
+    subtracted_result = scaled_product - input_data1
+    
+    # Clamp result between -1 and 1
+    clamped_result = triton_helpers.minimum(
+        triton_helpers.maximum(subtracted_result, -1.0), 1.0
+    )
+    
+    # Broadcast clamped result
+    broadcast_clamped = tl.broadcast_to(clamped_result, [XBLOCK, RBLOCK])
+    
+    # Apply mask and find max
     masked_clamped = tl.where(xmask, broadcast_clamped, float("-inf"))
+    max_values, max_indices = triton_helpers.max_with_index(masked_clamped, rindex, 1)
     
-    max_values, _ = triton_helpers.max2(masked_clamped, 1)[:, None]
-    broadcast_rindex = tl.broadcast_to(reduction_indices, masked_clamped.shape)
-    max_values_with_indices, max_indices = triton_helpers.max_with_index(masked_clamped, broadcast_rindex, 1)
-    
+    # Store results
     tl.debug_barrier()
-    
-    tl.store(in_out_ptr0 + (input_indices), log_plus_clamped, xmask)
-    tl.store(out_ptr0 + (input_indices), max_values, xmask)
-    tl.store(out_ptr1 + (input_indices), max_indices, xmask)
+    tl.store(in_out_ptr0 + (xindex), log_plus_adjusted, xmask)
+    tl.store(out_ptr0 + (xindex), max_values[:, None], xmask)
+    tl.store(out_ptr1 + (xindex), max_indices[:, None], xmask)

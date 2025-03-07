@@ -17,45 +17,46 @@ def triton_red_fused_add_div_mul_native_batch_norm_backward_sigmoid_sigmoid_back
     xindex = xoffset + tl.arange(0, XBLOCK)[:, None]
     xmask = xindex < xnumel
     rbase = tl.arange(0, RBLOCK)[None, :]
-    x_indices = xindex
-    temp_sum_grad = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    temp_sum_var = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    
-    input_var_values = tl.load(input_var_ptr + (x_indices), xmask, eviction_policy='evict_last')
-    
+    x0 = xindex
+
+    # Temporary storage for accumulated gradients
+    accumulated_grad = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    accumulated_var_grad = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+
     for roffset in range(0, rnumel, RBLOCK):
         rindex = roffset + rbase
         rmask = rindex < rnumel
-        r_indices = rindex
-        grad_values = tl.load(input_grad_ptr + (x_indices + 512 * r_indices), rmask & xmask, eviction_policy='evict_first', other=0.0)
-        data_values = tl.load(input_data_ptr + (x_indices + 512 * r_indices), rmask & xmask, eviction_policy='evict_first', other=0.0)
-        mean_values = tl.load(input_mean_ptr + (x_indices + 512 * r_indices), rmask & xmask, eviction_policy='evict_first', other=0.0)
-        
-        sigmoid_data = tl.sigmoid(data_values)
-        grad_scaled = grad_values * sigmoid_data
-        grad_unscaled = grad_values * data_values
-        one = 1.0
-        one_minus_sigmoid = one - sigmoid_data
-        grad_adjusted = sigmoid_data * one_minus_sigmoid
-        grad_var = grad_unscaled * grad_adjusted
-        grad_combined = grad_scaled + grad_var
-        grad_weighted = grad_combined * one
-        grad_broadcast = tl.broadcast_to(grad_weighted, [XBLOCK, RBLOCK])
-        temp_sum_grad += grad_broadcast
-        temp_sum_grad = tl.where(rmask & xmask, temp_sum_grad, temp_sum_grad)
-        
-        mean_adjusted = mean_values - input_var_values
-        var_weighted = grad_weighted * mean_adjusted
-        var_broadcast = tl.broadcast_to(var_weighted, [XBLOCK, RBLOCK])
-        temp_sum_var += var_broadcast
-        temp_sum_var = tl.where(rmask & xmask, temp_sum_var, temp_sum_var)
-    
-    output_grad_sum = tl.sum(temp_sum_grad, 1)[:, None]
-    output_var_sum = tl.sum(temp_sum_var, 1)[:, None]
-    
-    tl.store(output_grad_ptr + (x_indices), output_grad_sum, xmask)
-    tl.store(output_mean_ptr + (x_indices), output_var_sum, xmask)
-    
-    scale_values = tl.load(input_scale_ptr + (x_indices), xmask, eviction_policy='evict_last')
-    output_var_scaled = output_var_sum * scale_values
-    tl.store(output_var_ptr + (x_indices), output_var_scaled, xmask)
+        r1 = rindex
+
+        # Load input gradients and data
+        grad_input = tl.load(input_grad_ptr + (x0 + 512 * r1), rmask & xmask, eviction_policy='evict_first', other=0.0)
+        data_input = tl.load(input_data_ptr + (x0 + 512 * r1), rmask & xmask, eviction_policy='evict_first', other=0.0)
+        mean_input = tl.load(input_mean_ptr + (x0 + 512 * r1), rmask & xmask, eviction_policy='evict_first', other=0.0)
+
+        # Sigmoid and its derivative
+        sigmoid_output = tl.sigmoid(data_input)
+        grad_sigmoid = grad_input * sigmoid_output
+        grad_sigmoid_input = grad_input * data_input
+        sigmoid_derivative = 1.0 - sigmoid_output
+        grad_sigmoid_derivative = grad_sigmoid_input * sigmoid_derivative * sigmoid_output
+
+        # Accumulate gradients
+        grad_combined = grad_sigmoid + grad_sigmoid_derivative
+        grad_broadcast = tl.broadcast_to(grad_combined, [XBLOCK, RBLOCK])
+        accumulated_grad = tl.where(rmask & xmask, accumulated_grad + grad_broadcast, accumulated_grad)
+
+        # Accumulate variance gradients
+        var_grad = mean_input - tl.load(input_var_ptr + (x0), xmask, eviction_policy='evict_last')
+        var_grad_broadcast = tl.broadcast_to(grad_combined * var_grad, [XBLOCK, RBLOCK])
+        accumulated_var_grad = tl.where(rmask & xmask, accumulated_var_grad + var_grad_broadcast, accumulated_var_grad)
+
+    # Sum over the second dimension
+    output_grad_sum = tl.sum(accumulated_grad, 1)[:, None]
+    output_var_grad_sum = tl.sum(accumulated_var_grad, 1)[:, None]
+
+    # Store results
+    tl.store(output_grad_ptr + (x0), output_grad_sum, xmask)
+    tl.store(output_mean_ptr + (x0), output_grad_sum, xmask)
+    scale_input = tl.load(input_scale_ptr + (x0), xmask, eviction_policy='evict_last')
+    output_var_scaled = output_var_grad_sum * scale_input
+    tl.store(output_var_ptr + (x0), output_var_scaled, xmask)

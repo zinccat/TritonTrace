@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_gelu_logsumexp_1poi_fused_add_gelu_logsumexp_1(input_ptr0, input_ptr1, output_ptr0, num_elements, XBLOCK: tl.constexpr):
+def triton_poi_fused_add_gelu_logsumexp_1(input_ptr0, input_ptr1, output_ptr0, num_elements, XBLOCK: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
     mask = index < num_elements
@@ -18,10 +18,10 @@ def triton_poi_fused_add_gelu_logsumexp_1poi_fused_add_gelu_logsumexp_1(input_pt
     input_value1 = tl.load(input_ptr1 + (element_index), mask)
 
     abs_value = tl.math.abs(input_value0)
-    infinity = float("inf")
-    is_infinity = abs_value == infinity
+    inf_value = float("inf")
+    is_inf = abs_value == inf_value
     zero_value = 0.0
-    max_value = tl.where(is_infinity, zero_value, input_value0)
+    max_value = tl.where(is_inf, zero_value, input_value0)
 
     adjusted_value = input_value0 - max_value
     exp_value = tl.math.exp(adjusted_value)
@@ -35,8 +35,8 @@ def triton_poi_fused_add_gelu_logsumexp_1poi_fused_add_gelu_logsumexp_1(input_pt
     erf_input = logsumexp_value * erf_coefficient
     erf_value = tl.extra.cuda.libdevice.erf(erf_input)
 
-    one = 1.0
-    erf_adjusted = erf_value + one
+    one_value = 1.0
+    erf_adjusted = erf_value + one_value
     gelu_value = scaled_logsumexp * erf_adjusted
 
     fused_output = gelu_value + input_value1

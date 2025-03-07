@@ -7,9 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_scatter_zeros_2poi_fused_scatter_zeros_2(
-    input_ptr0, input_ptr1, input_ptr2, input_ptr3, output_ptr0, kernel_size0, kernel_size1, kernel_size2, kernel_size3, num_elements, XBLOCK: tl.constexpr
-):
+def triton_poi_fused_scatter_zeros_2(in_ptr0, in_ptr1, in_ptr2, in_ptr3, out_ptr0, kernel_size0, kernel_size1, kernel_size2, kernel_size3, num_elements, XBLOCK : tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
     mask = index < num_elements
@@ -17,33 +15,27 @@ def triton_poi_fused_scatter_zeros_2poi_fused_scatter_zeros_2(
     mod_index = index % kernel_size1
     div_index2 = index // kernel_size2
     div_index1 = index // kernel_size1
-
-    loaded_value0 = tl.load(input_ptr0 + (linear_index), mask, eviction_policy='evict_last')
-    loaded_value1 = tl.load(input_ptr1 + (linear_index), mask, eviction_policy='evict_last')
-    loaded_value2 = tl.load(
-        input_ptr2 + (mod_index + 4 * div_index2 + div_index2 * kernel_size3 * kernel_size3 + (-4) * kernel_size3 * div_index2),
-        mask,
-        eviction_policy='evict_last'
-    )
-    loaded_value3 = tl.load(input_ptr3 + (linear_index), mask, eviction_policy='evict_last')
-
-    tl.device_assert(((0 <= loaded_value0) & (loaded_value0 < (-2) + kernel_size0)) | ~(mask), "index out of bounds: 0 <= loaded_value0 < (-2) + kernel_size0")
-
-    negated_value1 = -loaded_value1
-    product_value = loaded_value3 * loaded_value1
-    fused_multiply_add = tl.extra.cuda.libdevice.fma(negated_value1, loaded_value2, product_value)
-
-    store_index = (
-        mod_index +
-        (-8) * div_index1 +
-        4 * loaded_value0 +
-        loaded_value0 * kernel_size3 * kernel_size3 +
-        (-4) * kernel_size3 * loaded_value0 +
-        (-2) * div_index1 * kernel_size3 * kernel_size3 +
-        4 * kernel_size0 * div_index1 +
-        8 * kernel_size3 * div_index1 +
-        kernel_size0 * div_index1 * kernel_size3 * kernel_size3 +
-        (-4) * kernel_size0 * kernel_size3 * div_index1
-    )
-
-    tl.store(output_ptr0 + store_index, fused_multiply_add, mask)
+    
+    input0 = tl.load(in_ptr0 + (linear_index), mask, eviction_policy='evict_last')
+    input1 = tl.load(in_ptr1 + (linear_index), mask, eviction_policy='evict_last')
+    input2 = tl.load(in_ptr2 + (mod_index + 4*div_index2 + div_index2*kernel_size3*kernel_size3 + ((-4)*kernel_size3*div_index2)), mask, eviction_policy='evict_last')
+    input3 = tl.load(in_ptr3 + (linear_index), mask, eviction_policy='evict_last')
+    
+    tl.device_assert(((0 <= input0) & (input0 < (-2) + kernel_size0)) | ~(mask), "index out of bounds: 0 <= input0 < (-2) + kernel_size0")
+    
+    neg_input1 = -input1
+    mul_input3_input1 = input3 * input1
+    fused_multiply_add = tl.extra.cuda.libdevice.fma(neg_input1, input2, mul_input3_input1)
+    
+    store_index = (mod_index + 
+                   ((-8)*div_index1) + 
+                   4*input0 + 
+                   input0*kernel_size3*kernel_size3 + 
+                   ((-4)*kernel_size3*input0) + 
+                   ((-2)*div_index1*kernel_size3*kernel_size3) + 
+                   4*kernel_size0*div_index1 + 
+                   8*kernel_size3*div_index1 + 
+                   kernel_size0*div_index1*kernel_size3*kernel_size3 + 
+                   ((-4)*kernel_size0*kernel_size3*div_index1))
+    
+    tl.store(out_ptr0 + (store_index), fused_multiply_add, mask)

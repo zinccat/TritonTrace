@@ -7,19 +7,17 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_flip_1poi_fused_flip_1(in_ptr0, out_ptr0, kernel_size, num_elements, XBLOCK: tl.constexpr):
+def triton_poi_fused_flip_1(in_ptr0, out_ptr0, kernel_size, num_elements, XBLOCK: tl.constexpr):
     block_offset = tl.program_id(0) * XBLOCK
-    block_indices = block_offset + tl.arange(0, XBLOCK)[:]
-    valid_mask = block_indices < num_elements
+    element_index = block_offset + tl.arange(0, XBLOCK)[:]
+    valid_mask = element_index < num_elements
+    kernel_index = element_index % kernel_size
+    batch_index = element_index // kernel_size
+    global_index = element_index
     
-    index_mod_kernel = block_indices % kernel_size
-    index_div_kernel = block_indices // kernel_size
-    original_index = block_indices
+    # Calculate the memory address for loading
+    load_address = (-1) + kernel_size + ((-1) * kernel_index) + kernel_size * batch_index
+    temp_value = tl.load(in_ptr0 + load_address, valid_mask, eviction_policy='evict_last')
     
-    temp_value = tl.load(
-        in_ptr0 + ((-1) + kernel_size + ((-1) * index_mod_kernel) + kernel_size * index_div_kernel),
-        valid_mask,
-        eviction_policy='evict_last'
-    )
-    
-    tl.store(out_ptr0 + (original_index), temp_value, valid_mask)
+    # Store the result in the output pointer
+    tl.store(out_ptr0 + global_index, temp_value, valid_mask)

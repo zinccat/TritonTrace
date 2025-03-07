@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_native_group_norm_0per_fused_native_group_norm_0(in_out_ptr0, in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
+def triton_per_fused_native_group_norm_0(in_out_ptr0, in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 64
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:, None]
@@ -22,9 +22,9 @@ def triton_per_fused_native_group_norm_0per_fused_native_group_norm_0(in_out_ptr
     repeated_broadcast = tl.broadcast_to(broadcasted_input, [XBLOCK, RBLOCK])
     masked_broadcast = tl.where(xmask, repeated_broadcast, 0)
     sum_over_r = tl.sum(masked_broadcast, 1)[:, None]
-    num_elements = tl.full([XBLOCK, 1], 64, tl.int32)
-    num_elements_float = num_elements.to(tl.float32)
-    mean = sum_over_r / num_elements_float
+    block_size = tl.full([XBLOCK, 1], 64, tl.int32)
+    block_size_float = block_size.to(tl.float32)
+    mean = sum_over_r / block_size_float
     centered_values = broadcasted_input - mean
     squared_centered = centered_values * centered_values
     broadcasted_squared = tl.broadcast_to(squared_centered, [XBLOCK, RBLOCK])

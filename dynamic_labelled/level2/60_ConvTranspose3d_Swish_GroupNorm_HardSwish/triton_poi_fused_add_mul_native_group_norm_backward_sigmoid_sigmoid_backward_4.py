@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_mul_native_group_norm_backward_sigmoid_sigmoid_backward_4poi_fused_add_mul_native_group_norm_backward_sigmoid_sigmoid_backward_4(
+def triton_poi_fused_add_mul_native_group_norm_backward_sigmoid_sigmoid_backward_4(
     in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, in_ptr4, in_ptr5, in_ptr6, 
     kernel_size_0, kernel_size_1, kernel_size_2, kernel_size_3, kernel_size_4, 
     xnumel, XBLOCK: tl.constexpr
@@ -15,10 +15,11 @@ def triton_poi_fused_add_mul_native_group_norm_backward_sigmoid_sigmoid_backward
     x_offset = tl.program_id(0) * XBLOCK
     x_index = x_offset + tl.arange(0, XBLOCK)[:]
     x_mask = x_index < xnumel
+
     x_mod_k0 = x_index % kernel_size_0
     x_div_k0 = x_index // kernel_size_0
     x_div_k4 = x_index // kernel_size_4
-    x_mod_k1 = x_index // kernel_size_0 % 16
+    x_mod_k1 = (x_index // kernel_size_0) % 16
     x_full_index = x_index
 
     tmp0 = tl.load(
@@ -131,7 +132,6 @@ def triton_poi_fused_add_mul_native_group_norm_backward_sigmoid_sigmoid_backward
     tmp43 = tmp24 * tmp42
     tmp44 = tmp20 * tmp43
     tmp45 = tmp17 + tmp44
-
     tmp47 = tmp45 + tmp46
 
     tmp49 = tl.sigmoid(tmp48)

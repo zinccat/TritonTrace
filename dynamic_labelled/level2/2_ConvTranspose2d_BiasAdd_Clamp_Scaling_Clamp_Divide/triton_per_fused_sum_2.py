@@ -7,24 +7,31 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_sum_2per_fused_sum_2(input_ptr, output_ptr, input_num_elements, result_num_elements, INPUT_BLOCK : tl.constexpr):
-    input_num_elements = 16
-    result_num_elements = 21
-    RESULT_BLOCK: tl.constexpr = 32
+def triton_per_fused_sum_2(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
+    xnumel = 16
+    rnumel = 21
+    RBLOCK: tl.constexpr = 32
     
-    input_offset = tl.program_id(0) * INPUT_BLOCK
-    input_indices = input_offset + tl.arange(0, INPUT_BLOCK)[:, None]
-    input_mask = input_indices < input_num_elements
+    # Calculate the starting index for the input data
+    input_offset = tl.program_id(0) * XBLOCK
+    input_indices = input_offset + tl.arange(0, XBLOCK)[:, None]
     
-    result_indices = tl.arange(0, RESULT_BLOCK)[None, :]
-    result_mask = result_indices < result_num_elements
+    # Create a mask to ensure indices are within bounds
+    input_mask = input_indices < xnumel
+    reduction_indices = tl.arange(0, RBLOCK)[None, :]
+    reduction_mask = reduction_indices < rnumel
     
-    result_row_indices = result_indices
-    input_col_indices = input_indices
+    # Load data from input pointer with masking
+    loaded_data = tl.load(in_ptr0 + (input_indices + 16 * reduction_indices), reduction_mask & input_mask, other=0.0)
     
-    loaded_values = tl.load(input_ptr + (input_col_indices + 16 * result_row_indices), result_mask & input_mask, other=0.0)
-    broadcasted_values = tl.broadcast_to(loaded_values, [INPUT_BLOCK, RESULT_BLOCK])
-    masked_values = tl.where(result_mask & input_mask, broadcasted_values, 0)
+    # Broadcast loaded data to match the reduction block size
+    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
     
-    summed_values = tl.sum(masked_values, 1)[:, None]
-    tl.store(output_ptr + (input_col_indices), summed_values, input_mask)
+    # Apply mask and zero out elements outside the valid range
+    masked_data = tl.where(reduction_mask & input_mask, broadcasted_data, 0)
+    
+    # Sum along the reduction dimension
+    summed_data = tl.sum(masked_data, 1)[:, None]
+    
+    # Store the result back to the output pointer
+    tl.store(out_ptr0 + (input_indices), summed_data, input_mask)

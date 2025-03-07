@@ -7,22 +7,22 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_add_mul_sum_0red_fused_add_mul_sum_0(
+def triton_red_fused_add_mul_sum_0(
     input_ptr0, input_ptr1, input_ptr2, output_ptr0, kernel_size0, kernel_size1, kernel_size2, 
     xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
     xnumel = 310
     x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_index < xnumel
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
+    x_mask = x_indices < xnumel
     r_base = tl.arange(0, RBLOCK)[None, :]
-    x0 = x_index
-    temp_result = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    x0 = x_indices
+    temp_accumulator = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
 
     for r_offset in range(0, rnumel, RBLOCK):
-        r_index = r_offset + r_base
-        r_mask = r_index < rnumel
-        r1 = r_index
+        r_indices = r_offset + r_base
+        r_mask = r_indices < rnumel
+        r1 = r_indices
 
         divisor = triton_helpers.div_floor_integer(
             309 + ((-16) * kernel_size0) + ((-16) * kernel_size0 * kernel_size2 * kernel_size2) + 
@@ -67,8 +67,8 @@ def triton_red_fused_add_mul_sum_0red_fused_add_mul_sum_0(
         tmp8 = tl.full(tmp7.shape, 0, tmp7.dtype)
         tmp9 = tl.where(tmp2, tmp7, tmp8)
         tmp10 = tl.broadcast_to(tmp9, [XBLOCK, RBLOCK])
-        tmp12 = temp_result + tmp10
-        temp_result = tl.where(rmask & x_mask, tmp12, temp_result)
+        tmp12 = temp_accumulator + tmp10
+        temp_accumulator = tl.where(rmask & x_mask, tmp12, temp_accumulator)
 
-    temp_sum = tl.sum(temp_result, 1)[:, None]
+    temp_sum = tl.sum(temp_accumulator, 1)[:, None]
     tl.store(output_ptr0 + (x0), temp_sum, x_mask)

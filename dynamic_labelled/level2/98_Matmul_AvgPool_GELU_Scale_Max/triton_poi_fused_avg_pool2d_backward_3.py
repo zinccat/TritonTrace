@@ -7,44 +7,56 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_avg_pool2d_backward_3poi_fused_avg_pool2d_backward_3(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
-    # Calculate the starting index for the current program
-    start_index = tl.program_id(0) * XBLOCK
-    # Generate a range of indices from start_index
-    indices = start_index + tl.arange(0, XBLOCK)[:]
-    # Create a mask to ensure indices are within bounds
-    valid_mask = indices < xnumel
-    
-    # Calculate various components for indexing
-    index_mod_256 = indices % 256
-    index_div_256 = indices // 256
-    full_index = indices
-    
-    # Load data from input pointer with calculated offset and mask
-    offset_component = 64 * index_div_256
-    inner_offset = (((0) * ((0) >= (index_mod_256 // 4)) + (index_mod_256 // 4) * ((index_mod_256 // 4) > (0))))
-    range_limit = ((((0) * ((0) >= (index_mod_256 // 4)) + (index_mod_256 // 4) * ((index_mod_256 // 4) > (0)))) <= ((-1) + ((64) * ((64) <= (1 + (index_mod_256 // 4))) + (1 + (index_mod_256 // 4)) * ((1 + (index_mod_256 // 4)) < (64)))))
-    final_offset = ((-1) + ((64) * ((64) <= (1 + (index_mod_256 // 4))) + (1 + (index_mod_256 // 4)) * ((1 + (index_mod_256 // 4)) < (64))))
-    valid_range = (((-1) + ((64) * ((64) <= (1 + (index_mod_256 // 4))) + (1 + (index_mod_256 // 4)) * ((1 + (index_mod_256 // 4)) < (64)))) < (((0) * ((0) >= (index_mod_256 // 4)) + (index_mod_256 // 4) * ((index_mod_256 // 4) > (0)))))
-    
-    loaded_data = tl.load(in_ptr0 + (offset_component + (inner_offset * range_limit * final_offset * valid_range)), valid_mask, eviction_policy='evict_last')
-    
-    # Perform division
-    divided_data = loaded_data / 4
-    
-    # Create temporary tensors
+def triton_poi_fused_avg_pool2d_backward_3(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    program_id = tl.program_id(0)
+    xoffset = program_id * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+
+    x_mod_256 = xindex % 256
+    x_div_256 = xindex // 256
+    x_full_index = xindex
+
+    load_offset = 64 * x_div_256 + (
+        (
+            (0) * ((0) >= (x_mod_256 // 4)) + (x_mod_256 // 4) * ((x_mod_256 // 4) > (0))
+        ) * (
+            (
+                (0) * ((0) >= (x_mod_256 // 4)) + (x_mod_256 // 4) * ((x_mod_256 // 4) > (0))
+            ) <= (
+                (-1) + (
+                    (64) * ((64) <= (1 + (x_mod_256 // 4))) + (1 + (x_mod_256 // 4)) * ((1 + (x_mod_256 // 4)) < (64))
+                )
+            )
+        ) + (
+            (-1) + (
+                (64) * ((64) <= (1 + (x_mod_256 // 4))) + (1 + (x_mod_256 // 4)) * ((1 + (x_mod_256 // 4)) < (64))
+            )
+        ) * (
+            (
+                (-1) + (
+                    (64) * ((64) <= (1 + (x_mod_256 // 4))) + (1 + (x_mod_256 // 4)) * ((1 + (x_mod_256 // 4)) < (64))
+                )
+            ) < (
+                (0) * ((0) >= (x_mod_256 // 4)) + (x_mod_256 // 4) * ((x_mod_256 // 4) > (0))
+            )
+        )
+    )
+
+    loaded_data = tl.load(in_ptr0 + load_offset, xmask, eviction_policy='evict_last')
+    averaged_data = loaded_data / 4
+
     zero_tensor = tl.full([1], 0, tl.int32)
     one_tensor = tl.full([1], 1, tl.int32)
-    
-    # Create masks for conditions
-    zero_less_one_mask = zero_tensor < one_tensor
-    inner_offset_mask = ((0) * ((0) >= (index_mod_256 // 4)) + (index_mod_256 // 4) * ((index_mod_256 // 4) > (0)))
-    range_limit_mask = ((64) * ((64) <= (1 + (index_mod_256 // 4))) + (1 + (index_mod_256 // 4)) * ((1 + (index_mod_256 // 4)) < (64)))
-    valid_inner_offset_mask = inner_offset_mask < range_limit_mask
-    combined_mask = zero_less_one_mask & valid_inner_offset_mask
-    
-    # Use where to select between divided data and zero
-    result_data = tl.where(combined_mask, divided_data, 0.0)
-    
-    # Store the result back to the output pointer
-    tl.store(out_ptr0 + (full_index), result_data, valid_mask)
+    zero_less_one = zero_tensor < one_tensor
+
+    condition1 = (0) * ((0) >= (x_mod_256 // 4)) + (x_mod_256 // 4) * ((x_mod_256 // 4) > (0))
+    condition2 = (64) * ((64) <= (1 + (x_mod_256 // 4))) + (1 + (x_mod_256 // 4)) * ((1 + (x_mod_256 // 4)) < (64))
+    condition3 = condition1 < condition2
+
+    combined_condition = zero_less_one & condition3
+
+    zero_float = 0.0
+    result_data = tl.where(combined_condition, averaged_data, zero_float)
+
+    tl.store(out_ptr0 + x_full_index, result_data, xmask)

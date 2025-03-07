@@ -7,26 +7,19 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_convolution_backward_6(
-    input_ptr, output_ptr, input_num_elements, output_num_elements, XBLOCK: tl.constexpr
-):
-    input_num_elements = 16
-    output_num_elements = 21
+def triton_per_fused_convolution_backward_6(input_ptr, output_ptr, input_elements, output_elements, XBLOCK: tl.constexpr):
+    input_elements = 16
+    output_elements = 21
     RBLOCK: tl.constexpr = 32
-
     input_offset = tl.program_id(0) * XBLOCK
-    input_indices = input_offset + tl.arange(0, XBLOCK)[:, None]
-    input_mask = input_indices < input_num_elements
-
-    output_indices = tl.arange(0, RBLOCK)[None, :]
-    output_mask = output_indices < output_num_elements
-
-    output_row_indices = output_indices
-    input_col_indices = input_indices
-
-    loaded_values = tl.load(input_ptr + (input_col_indices + 16 * output_row_indices), output_mask & input_mask, other=0.0)
-    broadcasted_values = tl.broadcast_to(loaded_values, [XBLOCK, RBLOCK])
-    masked_values = tl.where(output_mask & input_mask, broadcasted_values, 0)
-    summed_values = tl.sum(masked_values, 1)[:, None]
-
-    tl.store(output_ptr + (input_col_indices), summed_values, input_mask)
+    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
+    input_mask = input_index < input_elements
+    output_index = tl.arange(0, RBLOCK)[None, :]
+    output_mask = output_index < output_elements
+    output_row = output_index
+    input_col = input_index
+    temp_data = tl.load(input_ptr + (input_col + 16 * output_row), output_mask & input_mask, other=0.0)
+    temp_broadcast = tl.broadcast_to(temp_data, [XBLOCK, RBLOCK])
+    temp_filtered = tl.where(output_mask & input_mask, temp_broadcast, 0)
+    temp_sum = tl.sum(temp_filtered, 1)[:, None]
+    tl.store(output_ptr + (input_col), temp_sum, input_mask)

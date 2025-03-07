@@ -7,30 +7,24 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_convolution_backward_3(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
-    xnumel = 16
-    rnumel = 15
+def triton_per_fused_convolution_backward_3(input_ptr, output_ptr, input_elements, output_elements, XBLOCK: tl.constexpr):
+    input_elements = 16
+    output_elements = 15
     RBLOCK: tl.constexpr = 16
     
-    # Calculate the starting index for the current program
-    x_start_index = tl.program_id(0) * XBLOCK
-    x_indices = x_start_index + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < xnumel
+    input_offset = tl.program_id(0) * XBLOCK
+    input_indices = input_offset + tl.arange(0, XBLOCK)[:, None]
+    input_mask = input_indices < input_elements
     
-    r_indices = tl.arange(0, RBLOCK)[None, :]
-    r_mask = r_indices < rnumel
+    output_indices = tl.arange(0, RBLOCK)[None, :]
+    output_mask = output_indices < output_elements
     
-    # Load data from input pointer with masking
-    input_data = tl.load(in_ptr0 + (x_indices + 16 * r_indices), r_mask & x_mask, other=0.0)
+    output_row_indices = output_indices
+    input_col_indices = input_indices
     
-    # Broadcast loaded data to match dimensions
-    broadcasted_data = tl.broadcast_to(input_data, [XBLOCK, RBLOCK])
+    loaded_values = tl.load(input_ptr + (input_col_indices + 16 * output_row_indices), output_mask & input_mask, other=0.0)
+    broadcasted_values = tl.broadcast_to(loaded_values, [XBLOCK, RBLOCK])
+    masked_values = tl.where(output_mask & input_mask, broadcasted_values, 0)
+    summed_values = tl.sum(masked_values, 1)[:, None]
     
-    # Apply mask and zero out elements outside the mask
-    masked_data = tl.where(r_mask & x_mask, broadcasted_data, 0)
-    
-    # Sum along the second dimension and reshape
-    summed_data = tl.sum(masked_data, 1)[:, None]
-    
-    # Store the result in the output pointer with masking
-    tl.store(out_ptr0 + (x_indices), summed_data, x_mask)
+    tl.store(output_ptr + (input_col_indices), summed_values, input_mask)

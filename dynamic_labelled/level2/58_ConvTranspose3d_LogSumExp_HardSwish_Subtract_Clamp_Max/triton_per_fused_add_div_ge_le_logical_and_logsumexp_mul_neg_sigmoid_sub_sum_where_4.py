@@ -7,26 +7,19 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_add_div_ge_le_logical_and_logsumexp_mul_neg_sigmoid_sub_sum_where_4per_fused_add_div_ge_le_logical_and_logsumexp_mul_neg_sigmoid_sub_sum_where_4(
-    input_ptr, output_ptr, num_elements_x, num_elements_r, XBLOCK: tl.constexpr
-):
+def triton_per_fused_add_div_ge_le_logical_and_logsumexp_mul_neg_sigmoid_sub_sum_where_4(input_ptr, output_ptr, num_elements_x, num_elements_r, BLOCK_SIZE_X : tl.constexpr):
     num_elements_x = 16
     num_elements_r = 123
-    RBLOCK: tl.constexpr = 128
-
-    x_offset = tl.program_id(0) * XBLOCK
-    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < num_elements_x
-
-    r_indices = tl.arange(0, RBLOCK)[None, :]
-    r_mask = r_indices < num_elements_r
-
-    r1 = r_indices
-    x0 = x_indices
-
-    tmp0 = tl.load(input_ptr + (x0 + 16 * r1), r_mask & x_mask, other=0.0)
-    tmp1 = tl.broadcast_to(tmp0, [XBLOCK, RBLOCK])
-    tmp3 = tl.where(r_mask & x_mask, tmp1, 0)
-    tmp4 = tl.sum(tmp3, 1)[:, None]
-
-    tl.store(output_ptr + (x0), tmp4, x_mask)
+    BLOCK_SIZE_R: tl.constexpr = 128
+    offset_x = tl.program_id(0) * BLOCK_SIZE_X
+    index_x = offset_x + tl.arange(0, BLOCK_SIZE_X)[:, None]
+    mask_x = index_x < num_elements_x
+    index_r = tl.arange(0, BLOCK_SIZE_R)[None, :]
+    mask_r = index_r < num_elements_r
+    repeated_index_r = index_r
+    original_index_x = index_x
+    loaded_values = tl.load(input_ptr + (original_index_x + 16 * repeated_index_r), mask_r & mask_x, other=0.0)
+    broadcasted_values = tl.broadcast_to(loaded_values, [BLOCK_SIZE_X, BLOCK_SIZE_R])
+    masked_values = tl.where(mask_r & mask_x, broadcasted_values, 0)
+    summed_values = tl.sum(masked_values, 1)[:, None]
+    tl.store(output_ptr + (original_index_x), summed_values, mask_x)

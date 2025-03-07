@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_div_mul_0poi_fused_div_mul_0(input_ptr, output_ptr, kernel_size, num_elements, XBLOCK: tl.constexpr):
+def triton_poi_fused_div_mul_0(input_ptr, output_ptr, kernel_size, num_elements, XBLOCK: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     indices = offset + tl.arange(0, XBLOCK)[:]
     mask = indices < num_elements

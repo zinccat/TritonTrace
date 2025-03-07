@@ -7,7 +7,10 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_backward_3(in_ptr, out_ptr, kernel_size_d, kernel_size_h, kernel_size_w, kernel_size_c, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+def triton_red_fused_convolution_backward_3(
+    input_ptr, output_ptr, kernel_size_z, kernel_size_y, kernel_size_x, kernel_size_w, input_num_elements, reduction_num_elements, 
+    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
+):
     input_num_elements = 336
     input_offset = tl.program_id(0) * XBLOCK
     input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
@@ -25,136 +28,171 @@ def triton_red_fused_convolution_backward_3(in_ptr, out_ptr, kernel_size_d, kern
 
         temp_index = reduction_linear_index + input_block * (
             triton_helpers.div_floor_integer(
-                20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
+                20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                21
             )
         )
 
-        temp_condition = (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                         4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                         kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                         (-4 * kernel_size_c * kernel_size_h * kernel_size_w)
-
-        temp_mask = temp_index < temp_condition
-
-        temp_load = tl.load(
-            in_ptr + (
-                (-128) * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // kernel_size_d) % kernel_size_c)
-                ) + (-8) * input_channel + (-2) * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // (-2 + kernel_size_w)) % (-2 + kernel_size_w))
-                ) + 4 * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // (4 + kernel_size_w * kernel_size_w + (-4) * kernel_size_w)) % (-2 + kernel_size_h))
-                ) + kernel_size_w * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // (-2 + kernel_size_w)) % (-2 + kernel_size_w))
-                ) + kernel_size_w * kernel_size_w * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // (4 + kernel_size_w * kernel_size_w + (-4) * kernel_size_w)) % (-2 + kernel_size_h))
-                ) + (-32) * kernel_size_w * kernel_size_w * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // kernel_size_d) % kernel_size_c)
-                ) + (-4) * kernel_size_w * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // (4 + kernel_size_w * kernel_size_w + (-4) * kernel_size_w)) % (-2 + kernel_size_h))
-                ) + (-2) * input_channel * kernel_size_w * kernel_size_w + 4 * kernel_h * input_channel +
-                8 * kernel_size_w * input_channel + 64 * kernel_h * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // kernel_size_d) % kernel_size_c)
-                ) + 128 * kernel_size_w * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // kernel_size_d) % kernel_size_c)
-                ) + kernel_h * input_channel * kernel_size_w * kernel_size_w + (-64) * kernel_h * kernel_size_w * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // kernel_size_d) % kernel_size_c)
-                ) + (-4) * kernel_h * kernel_size_w * input_channel + 16 * kernel_h * kernel_size_w * kernel_size_w * (
-                    (((reduction_linear_index + input_block * (
-                        triton_helpers.div_floor_integer(
-                            20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                            4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                            kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                            (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                        )
-                    ) // kernel_size_d) % kernel_size_c)
-                ) + (((reduction_linear_index + input_block * (
-                    triton_helpers.div_floor_integer(
-                        20 + (-8 * kernel_size_c) + (-2 * kernel_size_c * kernel_size_w * kernel_size_w) +
-                        4 * kernel_size_c * kernel_size_h + 8 * kernel_size_c * kernel_size_w +
-                        kernel_size_c * kernel_size_h * kernel_size_w * kernel_size_w +
-                        (-4 * kernel_size_c * kernel_size_h * kernel_size_w), 21
-                    )
-                ) % (-2 + kernel_size_w))))
-            ), reduction_mask & temp_mask & input_mask, eviction_policy='evict_last', other=0.0
+        temp_condition = (
+            (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+            (-4 * kernel_size_z * kernel_size_y * kernel_size_x)
         )
 
-        temp_broadcast = tl.broadcast_to(temp_load, [XBLOCK, RBLOCK])
-        temp_accumulate = temp_result + temp_broadcast
-        temp_result = tl.where(reduction_mask & input_mask, temp_accumulate, temp_result)
+        condition_mask = temp_index < temp_condition
 
-    temp_sum = tl.sum(temp_result, 1)[:, None]
-    tl.store(out_ptr + (input_linear_index), temp_sum, input_mask)
+        input_address = (
+            (-128) * (
+                (((reduction_linear_index + input_block * (
+                    triton_helpers.div_floor_integer(
+                        20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                        4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                        kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                        (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                        21
+                    )
+                ) // kernel_size_w) % kernel_size_z)
+                + (-8) * input_channel
+                + (-2) * (
+                    ((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // ((-2) + kernel_size_x)) % ((-2) + kernel_size_x))
+                )
+                + 4 * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // (4 + kernel_size_x * kernel_size_x + (-4) * kernel_size_x)) % ((-2) + kernel_size_y))
+                )
+                + kernel_size_x * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // ((-2) + kernel_size_x)) % ((-2) + kernel_size_x))
+                )
+                + kernel_size_x * kernel_size_x * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // (4 + kernel_size_x * kernel_size_x + (-4) * kernel_size_x)) % ((-2) + kernel_size_y))
+                )
+                + (-32) * kernel_size_x * kernel_size_x * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // kernel_size_w) % kernel_size_z)
+                )
+                + (-4) * kernel_size_x * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // (4 + kernel_size_x * kernel_size_x + (-4) * kernel_size_x)) % ((-2) + kernel_size_y))
+                )
+                + (-2) * input_channel * kernel_size_x * kernel_size_x
+                + 4 * kernel_size_y * input_channel
+                + 8 * kernel_size_x * input_channel
+                + 64 * kernel_size_y * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // kernel_size_w) % kernel_size_z))
+                )
+                + 128 * kernel_size_x * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // kernel_size_w) % kernel_size_z))
+                )
+                + kernel_size_y * input_channel * kernel_size_x * kernel_size_x
+                + (-64) * kernel_size_y * kernel_size_x * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // kernel_size_w) % kernel_size_z))
+                )
+                + (-4) * kernel_size_y * kernel_size_x * input_channel
+                + 16 * kernel_size_y * kernel_size_x * kernel_size_x * (
+                    (((reduction_linear_index + input_block * (
+                        triton_helpers.div_floor_integer(
+                            20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                            4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                            kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                            (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                            21
+                        )
+                    ) // kernel_size_w) % kernel_size_z))
+                )
+                + (((reduction_linear_index + input_block * (
+                    triton_helpers.div_floor_integer(
+                        20 + (-8 * kernel_size_z) + (-2 * kernel_size_z * kernel_size_x * kernel_size_x) + 
+                        4 * kernel_size_z * kernel_size_y + 8 * kernel_size_z * kernel_size_x + 
+                        kernel_size_z * kernel_size_y * kernel_size_x * kernel_size_x + 
+                        (-4 * kernel_size_z * kernel_size_y * kernel_size_x), 
+                        21
+                    )
+                ) % ((-2) + kernel_size_x))))
+        )
+
+        temp_data = tl.load(
+            input_ptr + input_address, 
+            mask=reduction_mask & condition_mask & input_mask, 
+            eviction_policy='evict_last', 
+            other=0.0
+        )
+
+        broadcast_temp_data = tl.broadcast_to(temp_data, [XBLOCK, RBLOCK])
+        temp_result += broadcast_temp_data
+        temp_result = tl.where(reduction_mask & input_mask, temp_result, temp_result)
+
+    result_sum = tl.sum(temp_result, 1)[:, None]
+    tl.store(output_ptr + input_linear_index, result_sum, input_mask)

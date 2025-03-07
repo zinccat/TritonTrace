@@ -7,15 +7,15 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_mul_threshold_backward_0poi_fused_mul_threshold_backward_0(input_ptr0, input_ptr1, output_ptr0, num_elements, BLOCK_SIZE : tl.constexpr):
-    block_offset = tl.program_id(0) * BLOCK_SIZE
-    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    mask = block_indices < num_elements
-    indices = block_indices
-    input_values0 = tl.load(input_ptr0 + (indices), mask).to(tl.int1)
-    input_values1 = tl.load(input_ptr1 + (indices), mask)
+def triton_poi_fused_mul_threshold_backward_0(input_ptr0, input_ptr1, output_ptr0, num_elements, XBLOCK: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    indices = offset + tl.arange(0, XBLOCK)[:]
+    mask = indices < num_elements
+    index = indices
+    input_value0 = tl.load(input_ptr0 + (index), mask).to(tl.int1)
+    input_value1 = tl.load(input_ptr1 + (index), mask)
     threshold_value = 0.0
-    selected_values = tl.where(input_values0, threshold_value, input_values1)
-    scale_factor = 1.5
-    scaled_values = selected_values * scale_factor
-    tl.store(output_ptr0 + (indices), scaled_values, mask)
+    selected_value = tl.where(input_value0, threshold_value, input_value1)
+    multiplier = 1.5
+    result_value = selected_value * multiplier
+    tl.store(output_ptr0 + (index), result_value, mask)

@@ -7,103 +7,103 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused__native_batch_norm_legit_functional_mul_softplus_tanh_1red_fused__native_batch_norm_legit_functional_mul_softplus_tanh_1(
-    input_ptr, output_ptr_mean, output_ptr_var, output_ptr_count, kernel_size_0, kernel_size_1, total_elements, reduction_elements, 
-    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
+def triton_red_fused__native_batch_norm_legit_functional_mul_softplus_tanh_1(
+    input_ptr, output_mean_ptr, output_var_ptr, output_weight_ptr, kernel_size_0, kernel_size_1, 
+    input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
-    total_elements = 240
-    x_offset = tl.program_id(0) * XBLOCK
-    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < total_elements
-    r_base = tl.arange(0, RBLOCK)[None, :]
-    x_channel = x_indices // 16
-    x_within_channel = x_indices % 16
+    input_num_elements = 240
+    input_offset = tl.program_id(0) * XBLOCK
+    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
+    input_mask = input_index < input_num_elements
+    reduction_base = tl.arange(0, RBLOCK)[None, :]
+    input_index_1 = input_index // 16
+    input_index_0 = (input_index % 16)
     temp_mean = tl.zeros([XBLOCK, RBLOCK], tl.float32)
     temp_m2 = tl.zeros([XBLOCK, RBLOCK], tl.float32)
     temp_weight = tl.zeros([XBLOCK, RBLOCK], tl.float32)
-    x_flat_index = x_indices
+    input_index_3 = input_index
 
-    for r_offset in range(0, reduction_elements, RBLOCK):
-        r_indices = r_offset + r_base
-        r_mask = r_indices < reduction_elements
-        r_flat_index = r_indices
-        temp_index = r_flat_index + x_channel * (
+    for reduction_offset in range(0, reduction_num_elements, RBLOCK):
+        reduction_index = reduction_offset + reduction_base
+        reduction_mask = reduction_index < reduction_num_elements
+        reduction_index_2 = reduction_index
+        temp_index_0 = reduction_index_2 + input_index_1 * (
             triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
         )
-        temp_limit = 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1
-        valid_index_mask = temp_index < temp_limit
-        input_value = tl.load(
+        temp_index_1 = 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1
+        temp_mask_0 = temp_index_0 < temp_index_1
+        temp_value = tl.load(
             input_ptr + (
                 -2 * (
                     (
-                        (r_flat_index + x_channel * (
+                        (reduction_index_2 + input_index_1 * (
                             triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
                         )) // (-2 + kernel_size_1)
                     ) % (-2 + kernel_size_1)
-                ) + 4 * x_within_channel + 64 * (
+                ) + 4 * input_index_0 + 64 * (
                     (
-                        (r_flat_index + x_channel * (
+                        (reduction_index_2 + input_index_1 * (
                             triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
                         )) // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)
                     ) % kernel_size_0
                 ) + kernel_size_1 * (
                     (
-                        (r_flat_index + x_channel * (
+                        (reduction_index_2 + input_index_1 * (
                             triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
                         )) // (-2 + kernel_size_1)
                     ) % (-2 + kernel_size_1)
-                ) + x_within_channel * kernel_size_1 * kernel_size_1 + (-64) * kernel_size_1 * (
+                ) + input_index_0 * kernel_size_1 * kernel_size_1 + (-64) * kernel_size_1 * (
                     (
-                        (r_flat_index + x_channel * (
+                        (reduction_index_2 + input_index_1 * (
                             triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
                         )) // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)
                     ) % kernel_size_0
-                ) + (-4) * kernel_size_1 * x_within_channel + 16 * kernel_size_1 * kernel_size_1 * (
+                ) + (-4) * kernel_size_1 * input_index_0 + 16 * kernel_size_1 * kernel_size_1 * (
                     (
-                        (r_flat_index + x_channel * (
+                        (reduction_index_2 + input_index_1 * (
                             triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
                         )) // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)
                     ) % kernel_size_0
-                ) + (r_flat_index + x_channel * (
-                    triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
-                )) % (-2 + kernel_size_1)
+                ) + (
+                    (reduction_index_2 + input_index_1 * (
+                        triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15)
+                    )) % (-2 + kernel_size_1)
+                )
             ),
-            r_mask & valid_index_mask & x_mask,
+            reduction_mask & temp_mask_0 & input_mask,
             eviction_policy='evict_last',
             other=0.0
         )
-        threshold = 20.0
-        is_greater_than_threshold = input_value > threshold
-        exp_value = tl.math.exp(input_value)
-        log1p_exp_value = tl.extra.cuda.libdevice.log1p(exp_value)
-        softplus_value = tl.where(is_greater_than_threshold, input_value, log1p_exp_value)
-        tanh_value = tl.extra.cuda.libdevice.tanh(softplus_value)
-        weighted_input = tanh_value * input_value
-        zero_tensor = tl.full(weighted_input.shape, 0, weighted_input.dtype)
-        masked_weighted_input = tl.where(valid_index_mask, weighted_input, zero_tensor)
-        zero_value = 0.0
+        threshold_value = 20.0
+        is_greater_than_threshold = temp_value > threshold_value
+        exp_value = tl.math.exp(temp_value)
+        log1p_value = tl.extra.cuda.libdevice.log1p(exp_value)
+        adjusted_value = tl.where(is_greater_than_threshold, temp_value, log1p_value)
+        tanh_value = tl.extra.cuda.libdevice.tanh(adjusted_value)
+        product_value = tanh_value * temp_value
+        zero_value = tl.full(product_value.shape, 0, product_value.dtype)
+        masked_product_value = tl.where(temp_mask_0, product_value, zero_value)
         zero_broadcast = tl.full(zero_value.shape, 0, zero_value.dtype)
-        masked_zero = tl.where(valid_index_mask, zero_value, zero_broadcast)
-        one_value = 1.0
-        one_broadcast = tl.full(one_value.shape, 0, one_value.dtype)
-        masked_one = tl.where(valid_index_mask, one_value, one_broadcast)
-        broadcast_weighted_input = tl.broadcast_to(masked_weighted_input, [XBLOCK, RBLOCK])
-        broadcast_zero = tl.broadcast_to(masked_zero, [XBLOCK, RBLOCK])
-        broadcast_one = tl.broadcast_to(masked_one, [XBLOCK, RBLOCK])
+        one_broadcast = tl.full(zero_value.shape, 1, zero_value.dtype)
+        masked_zero_broadcast = tl.where(temp_mask_0, zero_value, zero_broadcast)
+        masked_one_broadcast = tl.where(temp_mask_0, one_broadcast, one_broadcast)
+        broadcasted_product = tl.broadcast_to(masked_product_value, [XBLOCK, RBLOCK])
+        broadcasted_zero = tl.broadcast_to(masked_zero_broadcast, [XBLOCK, RBLOCK])
+        broadcasted_one = tl.broadcast_to(masked_one_broadcast, [XBLOCK, RBLOCK])
         temp_mean_next, temp_m2_next, temp_weight_next = triton_helpers.welford_combine(
             temp_mean, temp_m2, temp_weight,
-            broadcast_weighted_input, broadcast_zero, broadcast_one
+            broadcasted_product, broadcasted_zero, broadcasted_one
         )
-        temp_mean = tl.where(r_mask & x_mask, temp_mean_next, temp_mean)
-        temp_m2 = tl.where(r_mask & x_mask, temp_m2_next, temp_m2)
-        temp_weight = tl.where(r_mask & x_mask, temp_weight_next, temp_weight)
+        temp_mean = tl.where(reduction_mask & input_mask, temp_mean_next, temp_mean)
+        temp_m2 = tl.where(reduction_mask & input_mask, temp_m2_next, temp_m2)
+        temp_weight = tl.where(reduction_mask & input_mask, temp_weight_next, temp_weight)
 
-    mean_result, variance_result, count_result = triton_helpers.welford(
+    mean_result, variance_result, weight_result = triton_helpers.welford(
         temp_mean, temp_m2, temp_weight, 1
     )
-    mean_result = mean_result[:, None]
-    variance_result = variance_result[:, None]
-    count_result = count_result[:, None]
-    tl.store(output_ptr_mean + (x_flat_index), mean_result, x_mask)
-    tl.store(output_ptr_var + (x_flat_index), variance_result, x_mask)
-    tl.store(output_ptr_count + (x_flat_index), count_result, x_mask)
+    mean_result_broadcast = mean_result[:, None]
+    variance_result_broadcast = variance_result[:, None]
+    weight_result_broadcast = weight_result[:, None]
+    tl.store(output_mean_ptr + (input_index_3), mean_result_broadcast, input_mask)
+    tl.store(output_var_ptr + (input_index_3), variance_result_broadcast, input_mask)
+    tl.store(output_weight_ptr + (input_index_3), weight_result_broadcast, input_mask)

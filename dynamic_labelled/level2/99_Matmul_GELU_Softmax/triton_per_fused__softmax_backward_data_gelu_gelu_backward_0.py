@@ -30,7 +30,7 @@ def triton_per_fused__softmax_backward_data_gelu_gelu_backward_0(
     sum_over_rows = tl.sum(masked_broadcast, 1)[:, None]
 
     neg_input_data1 = -input_data1
-    adjusted_product = tl.extra.cuda.libdevice.fma(neg_input_data1, sum_over_rows, elementwise_product)
+    fused_multiply_add = tl.extra.cuda.libdevice.fma(neg_input_data1, sum_over_rows, elementwise_product)
 
     sqrt_half = 0.7071067811865476
     scaled_output_data = output_data * sqrt_half
@@ -46,8 +46,8 @@ def triton_per_fused__softmax_backward_data_gelu_gelu_backward_0(
     exp_result = tl.math.exp(exp_argument)
     sqrt_two_pi = 0.3989422804014327
     gaussian_term = exp_result * sqrt_two_pi
-    output_scaled_gaussian = output_data * gaussian_term
-    gelu_result = erf_half + output_scaled_gaussian
+    output_data_times_gaussian = output_data * gaussian_term
+    gelu_result = erf_half + output_data_times_gaussian
 
-    final_result = adjusted_product * gelu_result
+    final_result = fused_multiply_add * gelu_result
     tl.store(in_out_ptr0 + (row_indices + 10 * col_indices), final_result, r_mask & x_mask)

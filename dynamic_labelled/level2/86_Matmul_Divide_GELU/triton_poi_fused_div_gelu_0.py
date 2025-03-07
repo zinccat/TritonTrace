@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_div_gelu_0poi_fused_div_gelu_0(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+def triton_poi_fused_div_gelu_0(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]
     xmask = xindex < xnumel
@@ -26,13 +26,9 @@ def triton_poi_fused_div_gelu_0poi_fused_div_gelu_0(in_ptr0, out_ptr0, xnumel, X
     scaled_input = input_data * scale_factor
     half_scaled_input = scaled_input * half
     sqrt_half_scaled_input = scaled_input * sqrt_half
-
-    # Error function computation
     erf_result = tl.extra.cuda.libdevice.erf(sqrt_half_scaled_input)
-
-    # Final computation
     erf_plus_one = erf_result + one
-    result = half_scaled_input * erf_plus_one
+    final_result = half_scaled_input * erf_plus_one
 
     # Store result
-    tl.store(out_ptr0 + (x0), result, xmask)
+    tl.store(out_ptr0 + (x0), final_result, xmask)

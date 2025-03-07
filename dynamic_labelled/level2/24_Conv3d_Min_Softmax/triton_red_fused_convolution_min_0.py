@@ -7,64 +7,58 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_min_0red_fused_convolution_min_0(
-    input_ptr0, input_ptr1, output_ptr0, output_ptr1, kernel_size0, kernel_size1, kernel_size2, kernel_size3, 
-    x_num_elements, r_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
-):
-    x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_index < x_num_elements
-    r_base = tl.arange(0, RBLOCK)[None, :]
-    x_mod_k0 = (x_index % kernel_size0)
-    x_div_k0 = x_index // kernel_size0
-    x_mod_16 = ((x_index // kernel_size3) % 16)
+def triton_red_fused_convolution_min_0(in_ptr0, in_ptr1, out_ptr0, out_ptr1, kernel_size0, kernel_size1, kernel_size2, kernel_size3, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+    input_offset = tl.program_id(0) * XBLOCK
+    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
+    input_mask = input_index < input_num_elements
+    reduction_base = tl.arange(0, RBLOCK)[None, :]
+    input_mod_k0 = (input_index % kernel_size0)
+    input_div_k0 = input_index // kernel_size0
+    input_mod_16 = ((input_index // kernel_size3) % 16)
     
-    temp_input1 = tl.load(input_ptr1 + (x_mod_16), x_mask, eviction_policy='evict_last')
-    temp_min_inf = tl.full([XBLOCK, RBLOCK], float("inf"), tl.float32)
-    x_index_flat = x_index
-    temp_min_inf_final = tl.full([XBLOCK, RBLOCK], float("inf"), tl.float32)
-    temp_min_index = tl.full([XBLOCK, RBLOCK], 9223372036854775807, tl.int64)
+    temp1 = tl.load(in_ptr1 + (input_mod_16), input_mask, eviction_policy='evict_last')
+    temp4_inf = tl.full([XBLOCK, RBLOCK], float("inf"), tl.float32)
+    input_index_copy = input_index
+    temp6_inf = tl.full([XBLOCK, RBLOCK], float("inf"), tl.float32)
+    temp6_index_inf = tl.full([XBLOCK, RBLOCK], 9223372036854775807, tl.int64)
     
-    for r_offset in range(0, r_num_elements, RBLOCK):
-        r_index = r_offset + r_base
-        r_mask = r_index < r_num_elements
-        r_index_flat = rindex
+    for reduction_offset in range(0, reduction_num_elements, RBLOCK):
+        reduction_index = reduction_offset + reduction_base
+        reduction_mask = reduction_index < reduction_num_elements
+        reduction_index_copy = reduction_index
         
-        temp_input0 = tl.load(
-            input_ptr0 + (
-                x_mod_k0 + 
-                ((-8) * x_div_k0) + 
-                4 * r_index_flat + 
-                r_index_flat * kernel_size2 * kernel_size2 + 
-                ((-4) * kernel_size2 * r_index_flat) + 
-                ((-2) * x_div_k0 * kernel_size2 * kernel_size2) + 
-                4 * kernel_size1 * x_div_k0 + 
-                8 * kernel_size2 * x_div_k0 + 
-                kernel_size1 * x_div_k0 * kernel_size2 * kernel_size2 + 
-                ((-4) * kernel_size1 * kernel_size2 * x_div_k0)
+        temp0 = tl.load(
+            in_ptr0 + (
+                input_mod_k0 + 
+                ((-8) * input_div_k0) + 
+                4 * reduction_index_copy + 
+                reduction_index_copy * kernel_size2 * kernel_size2 + 
+                ((-4) * kernel_size2 * reduction_index_copy) + 
+                ((-2) * input_div_k0 * kernel_size2 * kernel_size2) + 
+                4 * kernel_size1 * input_div_k0 + 
+                8 * kernel_size2 * input_div_k0 + 
+                kernel_size1 * input_div_k0 * kernel_size2 * kernel_size2 + 
+                ((-4) * kernel_size1 * kernel_size2 * input_div_k0)
             ), 
-            rmask & x_mask, 
+            reduction_mask & input_mask, 
             eviction_policy='evict_last', 
             other=0.0
         )
         
-        temp_sum = temp_input0 + temp_input1
-        temp_broadcast = tl.broadcast_to(temp_sum, [XBLOCK, RBLOCK])
-        temp_min = triton_helpers.minimum(temp_min_inf, temp_broadcast)
-        temp_min_inf = tl.where(rmask & x_mask, temp_min, temp_min_inf)
+        temp2 = temp0 + temp1
+        temp3 = tl.broadcast_to(temp2, [XBLOCK, RBLOCK])
+        temp5 = triton_helpers.minimum(temp4_inf, temp3)
+        temp4_inf = tl.where(reduction_mask & input_mask, temp5, temp4_inf)
         
-        temp_min_next, temp_min_index_next = triton_helpers.minimum_with_index(
-            temp_min_inf_final, temp_min_index, temp_broadcast, r_index
+        temp6_next, temp6_index_next = triton_helpers.minimum_with_index(
+            temp6_inf, temp6_index_inf, temp3, reduction_index
         )
-        
-        temp_min_inf_final = tl.where(rmask & x_mask, temp_min_next, temp_min_inf_final)
-        temp_min_index = tl.where(rmask & x_mask, temp_min_index_next, temp_min_index)
+        temp6_inf = tl.where(reduction_mask & input_mask, temp6_next, temp6_inf)
+        temp6_index_inf = tl.where(reduction_mask & input_mask, temp6_index_next, temp6_index_inf)
     
-    temp_min_result = triton_helpers.min2(temp_min_inf, 1)[:, None]
-    temp_min_value, temp_min_index_result = triton_helpers.min_with_index(
-        temp_min_inf_final, temp_min_index, 1
-    )
-    temp_min_index_result = temp_min_index_result[:, None]
+    min_temp4 = triton_helpers.min2(temp4_inf, 1)[:, None]
+    min_temp6_val, min_temp6_idx = triton_helpers.min_with_index(temp6_inf, temp6_index_inf, 1)
+    min_temp6 = min_temp6_idx[:, None]
     
-    tl.store(output_ptr0 + (x_index_flat), temp_min_result, x_mask)
-    tl.store(output_ptr1 + (x_index_flat), temp_min_index_result, x_mask)
+    tl.store(out_ptr0 + (input_index_copy), min_temp4, input_mask)
+    tl.store(out_ptr1 + (input_index_copy), min_temp6, input_mask)

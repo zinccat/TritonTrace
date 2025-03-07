@@ -7,26 +7,26 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused__softmax__softmax_backward_data_4poi_fused__softmax__softmax_backward_data_4(
-    in_out_ptr, input_ptr, scale_ptr, shift_ptr, bias_ptr, kernel_size_0, kernel_size_1, kernel_size_2, num_elements, XBLOCK: tl.constexpr
+def triton_poi_fused__softmax__softmax_backward_data_4(
+    in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, kernel_size0, kernel_size1, kernel_size2, num_elements, XBLOCK: tl.constexpr
 ):
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
     mask = index < num_elements
     linear_index = index
-    kernel_index = index % kernel_size_0
-    batch_index = index // kernel_size_1
+    kernel_index = index % kernel_size0
+    batch_index = index // kernel_size1
 
-    output_value = tl.load(in_out_ptr + (linear_index), mask, eviction_policy='evict_last')
-    input_value = tl.load(input_ptr + (kernel_index + batch_index + 4 * kernel_size_2 * batch_index + 4 * batch_index * kernel_size_2 * kernel_size_2), mask, eviction_policy='evict_last')
-    scale_value = tl.load(scale_ptr + (kernel_index + batch_index + 4 * kernel_size_2 * batch_index + 4 * batch_index * kernel_size_2 * kernel_size_2), mask, eviction_policy='evict_last')
-    shift_value = tl.load(shift_ptr + (kernel_index + batch_index + 4 * kernel_size_2 * batch_index + 4 * batch_index * kernel_size_2 * kernel_size_2), mask, eviction_policy='evict_last')
-    bias_value = tl.load(bias_ptr + (linear_index), mask, eviction_policy='evict_last')
+    input_value = tl.load(in_out_ptr0 + (linear_index), mask, eviction_policy='evict_last')
+    softmax_input = tl.load(in_ptr0 + (kernel_index + batch_index + 4 * kernel_size2 * batch_index + 4 * batch_index * kernel_size2 * kernel_size2), mask, eviction_policy='evict_last')
+    softmax_denominator = tl.load(in_ptr1 + (kernel_index + batch_index + 4 * kernel_size2 * batch_index + 4 * batch_index * kernel_size2 * kernel_size2), mask, eviction_policy='evict_last')
+    gradient = tl.load(in_ptr2 + (kernel_index + batch_index + 4 * kernel_size2 * batch_index + 4 * batch_index * kernel_size2 * kernel_size2), mask, eviction_policy='evict_last')
+    bias = tl.load(in_ptr3 + (linear_index), mask, eviction_policy='evict_last')
 
-    diff = output_value - input_value
-    exp_diff = tl.math.exp(diff)
-    softmax_grad = exp_diff / scale_value
-    neg_softmax_grad = -softmax_grad
+    exp_input = input_value - softmax_input
+    exp_value = tl.math.exp(exp_input)
+    softmax_output = exp_value / softmax_denominator
+    neg_softmax_output = -softmax_output
 
-    updated_value = tl.extra.cuda.libdevice.fma(neg_softmax_grad, shift_value, bias_value)
-    tl.store(in_out_ptr + (linear_index), updated_value, mask)
+    result = tl.extra.cuda.libdevice.fma(neg_softmax_output, gradient, bias)
+    tl.store(in_out_ptr0 + (linear_index), result, mask)

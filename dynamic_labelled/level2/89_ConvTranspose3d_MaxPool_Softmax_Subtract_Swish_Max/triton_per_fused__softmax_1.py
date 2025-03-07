@@ -7,25 +7,25 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused__softmax_1per_fused__softmax_1(in_ptr0, out_ptr0, out_ptr1, kernel_size0, kernel_size1, kernel_size2, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr):
+def triton_per_fused__softmax_1(in_ptr0, out_ptr0, out_ptr1, ks0, ks1, ks2, xnumel, rnumel, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 16
-    input_offset = tl.program_id(0) * XBLOCK
-    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
-    input_mask = input_index < input_num_elements
-    reduction_index = tl.arange(0, RBLOCK)[None, :]
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:, None]
+    xmask = xindex < xnumel
+    rindex = tl.arange(0, RBLOCK)[None, :]
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
-    reduction_index_2 = reduction_index
-    kernel_index0 = (input_index % kernel_size0)
-    kernel_index1 = input_index // kernel_size0
-    linear_index = input_index
-    temp_max = tl.load(in_ptr0 + (kernel_index0 + kernel_size1 * reduction_index_2 * kernel_size2 * kernel_size2 + 16 * kernel_size1 * kernel_index1 * kernel_size2 * kernel_size2), input_mask, eviction_policy='evict_last', other=0.0)
-    temp_broadcast = tl.broadcast_to(temp_max, [XBLOCK, RBLOCK])
-    temp_masked = tl.where(input_mask, temp_broadcast, float("-inf"))
-    max_values = triton_helpers.max2(temp_masked, 1)[:, None]
-    temp_subtracted = temp_max - max_values
-    temp_exp = tl.math.exp(temp_subtracted)
-    temp_exp_broadcast = tl.broadcast_to(temp_exp, [XBLOCK, RBLOCK])
-    temp_exp_masked = tl.where(input_mask, temp_exp_broadcast, 0)
-    sum_exp = tl.sum(temp_exp_masked, 1)[:, None]
-    tl.store(out_ptr0 + (linear_index), max_values, input_mask)
-    tl.store(out_ptr1 + (linear_index), sum_exp, input_mask)
+    r2 = rindex
+    x0 = (xindex % ks0)
+    x1 = xindex // ks0
+    x3 = xindex
+    input_slice = tl.load(in_ptr0 + (x0 + ks1 * r2 * ks2 * ks2 + 16 * ks1 * x1 * ks2 * ks2), xmask, eviction_policy='evict_last', other=0.0)
+    broadcasted_input = tl.broadcast_to(input_slice, [XBLOCK, RBLOCK])
+    masked_input = tl.where(xmask, broadcasted_input, float("-inf"))
+    max_values = triton_helpers.max2(masked_input, 1)[:, None]
+    shifted_input = input_slice - max_values
+    exp_values = tl.math.exp(shifted_input)
+    broadcasted_exp = tl.broadcast_to(exp_values, [XBLOCK, RBLOCK])
+    masked_exp = tl.where(xmask, broadcasted_exp, 0)
+    sum_exp = tl.sum(masked_exp, 1)[:, None]
+    tl.store(out_ptr0 + (x3), max_values, xmask)
+    tl.store(out_ptr1 + (x3), sum_exp, xmask)

@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_sigmoid_sigmoid_backward_0poi_fused_sigmoid_sigmoid_backward_0(in_out_ptr0, in_ptr0, in_ptr1, xnumel, XBLOCK: tl.constexpr):
+def triton_poi_fused_sigmoid_sigmoid_backward_0(in_out_ptr0, in_ptr0, in_ptr1, xnumel, XBLOCK: tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]
     xmask = xindex < xnumel
@@ -24,15 +24,14 @@ def triton_poi_fused_sigmoid_sigmoid_backward_0poi_fused_sigmoid_sigmoid_backwar
     # Load the in-out pointer with masking
     in_out_value = tl.load(in_out_ptr0 + (x2), xmask)
 
-    # Compute the sigmoid of the in-out value
+    # Compute intermediate values
+    product_input_masked = broadcasted_input * masked_input
     sigmoid_value = tl.sigmoid(in_out_value)
-
-    # Compute the derivative of the sigmoid
-    sigmoid_derivative = 1.0 - sigmoid_value
-    scaled_sigmoid_derivative = sigmoid_value * sigmoid_derivative
+    one_minus_sigmoid = 1.0 - sigmoid_value
+    gradient = sigmoid_value * one_minus_sigmoid
 
     # Compute the final result
-    result = broadcasted_input * masked_input * scaled_sigmoid_derivative
+    result = product_input_masked * gradient
 
-    # Store the result back to the in-out pointer
+    # Store the result back
     tl.store(in_out_ptr0 + (x2), result, xmask)

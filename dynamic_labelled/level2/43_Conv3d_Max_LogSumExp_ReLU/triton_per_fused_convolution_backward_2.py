@@ -7,31 +7,19 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_convolution_backward_2(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
-    xnumel = 16
-    rnumel = 21
+def triton_per_fused_convolution_backward_2(input_ptr, output_ptr, input_elements, output_elements, XBLOCK: tl.constexpr):
+    input_elements = 16
+    output_elements = 21
     RBLOCK: tl.constexpr = 32
-    
-    # Calculate the starting index for the input data
     input_offset = tl.program_id(0) * XBLOCK
-    input_indices = input_offset + tl.arange(0, XBLOCK)[:, None]
-    
-    # Create a mask to ensure indices are within bounds
-    input_mask = input_indices < xnumel
-    reduction_indices = tl.arange(0, RBLOCK)[None, :]
-    reduction_mask = reduction_indices < rnumel
-    
-    # Load data from input pointer with masking
-    loaded_data = tl.load(in_ptr0 + (input_indices + 16 * reduction_indices), reduction_mask & input_mask, other=0.0)
-    
-    # Broadcast loaded data to match the shape
-    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
-    
-    # Apply mask and zero out elements outside the mask
-    masked_data = tl.where(reduction_mask & input_mask, broadcasted_data, 0)
-    
-    # Sum along the reduction dimension
-    summed_data = tl.sum(masked_data, 1)[:, None]
-    
-    # Store the result back to the output pointer
-    tl.store(out_ptr0 + (input_indices), summed_data, input_mask)
+    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
+    input_mask = input_index < input_elements
+    output_index = tl.arange(0, RBLOCK)[None, :]
+    output_mask = output_index < output_elements
+    output_row = output_index
+    input_col = input_index
+    loaded_values = tl.load(input_ptr + (input_col + 16 * output_row), output_mask & input_mask, other=0.0)
+    broadcasted_values = tl.broadcast_to(loaded_values, [XBLOCK, RBLOCK])
+    masked_values = tl.where(output_mask & input_mask, broadcasted_values, 0)
+    summed_values = tl.sum(masked_values, 1)[:, None]
+    tl.store(output_ptr + (input_col), summed_values, input_mask)

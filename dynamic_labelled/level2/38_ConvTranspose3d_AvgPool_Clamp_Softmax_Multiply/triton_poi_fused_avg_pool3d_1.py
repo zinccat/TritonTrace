@@ -7,33 +7,37 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_avg_pool3d_1poi_fused_avg_pool3d_1(input_ptr, output_ptr, kernel_size_dim0, kernel_size_dim1, num_elements, BLOCK_SIZE : tl.constexpr):
-    block_offset = tl.program_id(0) * BLOCK_SIZE
-    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
+def triton_poi_fused_avg_pool3d_1(in_ptr0, out_ptr0, kernel_size_z, kernel_size_y, total_elements, XBLOCK: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    index = offset + tl.arange(0, XBLOCK)[:]
+    mask = index < total_elements
+    z = index % kernel_size_z
+    y = (index // kernel_size_z) % kernel_size_z
+    x = index // (kernel_size_y * kernel_size_z)
+    linear_index = index
 
-    kernel_index_dim0 = block_indices % kernel_size_dim0
-    kernel_index_dim1 = (block_indices // kernel_size_dim0) % kernel_size_dim0
-    kernel_index_dim2 = block_indices // kernel_size_dim1
-    linear_index = block_indices
+    # Load neighboring elements for averaging
+    neighbor_0 = tl.load(in_ptr0 + (2*z + 4*kernel_size_z*y + 8*x*kernel_size_z*kernel_size_z), mask, eviction_policy='evict_last')
+    neighbor_1 = tl.load(in_ptr0 + (1 + 2*z + 4*kernel_size_z*y + 8*kernel_size_y*x), mask, eviction_policy='evict_last')
+    neighbor_3 = tl.load(in_ptr0 + (2*kernel_size_z + 2*z + 4*kernel_size_z*y + 8*kernel_size_y*x), mask, eviction_policy='evict_last')
+    neighbor_5 = tl.load(in_ptr0 + (1 + 2*kernel_size_z + 2*z + 4*kernel_size_z*y + 8*kernel_size_y*x), mask, eviction_policy='evict_last')
+    neighbor_7 = tl.load(in_ptr0 + (2*z + 4*kernel_size_y + 4*kernel_size_z*y + 8*kernel_size_y*x), mask, eviction_policy='evict_last')
+    neighbor_9 = tl.load(in_ptr0 + (1 + 2*z + 4*kernel_size_y + 4*kernel_size_z*y + 8*kernel_size_y*x), mask, eviction_policy='evict_last')
+    neighbor_11 = tl.load(in_ptr0 + (2*kernel_size_z + 2*z + 4*kernel_size_y + 4*kernel_size_z*y + 8*kernel_size_y*x), mask, eviction_policy='evict_last')
+    neighbor_13 = tl.load(in_ptr0 + (1 + 2*kernel_size_z + 2*z + 4*kernel_size_y + 4*kernel_size_z*y + 8*kernel_size_y*x), mask, eviction_policy='evict_last')
 
-    value0 = tl.load(input_ptr + (2 * kernel_index_dim0 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_index_dim2 * kernel_size_dim0 * kernel_size_dim0), valid_mask, eviction_policy='evict_last')
-    value1 = tl.load(input_ptr + (1 + 2 * kernel_index_dim0 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_size_dim1 * kernel_index_dim2), valid_mask, eviction_policy='evict_last')
-    value3 = tl.load(input_ptr + (2 * kernel_size_dim0 + 2 * kernel_index_dim0 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_size_dim1 * kernel_index_dim2), valid_mask, eviction_policy='evict_last')
-    value5 = tl.load(input_ptr + (1 + 2 * kernel_size_dim0 + 2 * kernel_index_dim0 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_size_dim1 * kernel_index_dim2), valid_mask, eviction_policy='evict_last')
-    value7 = tl.load(input_ptr + (2 * kernel_index_dim0 + 4 * kernel_size_dim1 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_size_dim1 * kernel_index_dim2), valid_mask, eviction_policy='evict_last')
-    value9 = tl.load(input_ptr + (1 + 2 * kernel_index_dim0 + 4 * kernel_size_dim1 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_size_dim1 * kernel_index_dim2), valid_mask, eviction_policy='evict_last')
-    value11 = tl.load(input_ptr + (2 * kernel_size_dim0 + 2 * kernel_index_dim0 + 4 * kernel_size_dim1 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_size_dim1 * kernel_index_dim2), valid_mask, eviction_policy='evict_last')
-    value13 = tl.load(input_ptr + (1 + 2 * kernel_size_dim0 + 2 * kernel_index_dim0 + 4 * kernel_size_dim1 + 4 * kernel_size_dim0 * kernel_index_dim1 + 8 * kernel_size_dim1 * kernel_index_dim2), valid_mask, eviction_policy='evict_last')
+    # Sum the neighbors
+    sum_2 = neighbor_1 + neighbor_0
+    sum_4 = neighbor_3 + sum_2
+    sum_6 = neighbor_5 + sum_4
+    sum_8 = neighbor_7 + sum_6
+    sum_10 = neighbor_9 + sum_8
+    sum_12 = neighbor_11 + sum_10
+    sum_14 = neighbor_13 + sum_12
 
-    sum1 = value1 + value0
-    sum2 = value3 + sum1
-    sum3 = value5 + sum2
-    sum4 = value7 + sum3
-    sum5 = value9 + sum4
-    sum6 = value11 + sum5
-    sum7 = value13 + sum6
+    # Average the sum
+    average = 0.125
+    result = sum_14 * average
 
-    avg_value = 0.125 * sum7
-
-    tl.store(output_ptr + (linear_index), avg_value, valid_mask)
+    # Store the result
+    tl.store(out_ptr0 + (linear_index), result, mask)

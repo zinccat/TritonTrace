@@ -7,43 +7,47 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused__softmax__softmax_backward_data_clamp_ge_le_logical_and_mul_scalar_tensor_where_1poi_fused__softmax__softmax_backward_data_clamp_ge_le_logical_and_mul_scalar_tensor_where_1(
-    in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, kernel_size0, kernel_size1, kernel_size2, kernel_size3, num_elements, XBLOCK: tl.constexpr
+def triton_poi_fused__softmax__softmax_backward_data_clamp_ge_le_logical_and_mul_scalar_tensor_where_1(
+    in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, ks0, ks1, ks2, ks3, xnumel, XBLOCK: tl.constexpr
 ):
-    offset = tl.program_id(0) * XBLOCK
-    index = offset + tl.arange(0, XBLOCK)[:]
-    mask = index < num_elements
-    global_index = index
-    local_index0 = index % kernel_size0
-    local_index2 = index // kernel_size1
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x3 = xindex
+    x0 = (xindex % ks0)
+    x2 = xindex // ks1
 
-    output_value = tl.load(in_out_ptr0 + (global_index), mask, eviction_policy='evict_last')
-    input_value0 = tl.load(in_ptr0 + (local_index0 + kernel_size2 * local_index2 * kernel_size3 * kernel_size3), mask, eviction_policy='evict_last')
-    input_value1 = tl.load(in_ptr1 + (local_index0 + kernel_size2 * local_index2 * kernel_size3 * kernel_size3), mask, eviction_policy='evict_last')
-    input_value2 = tl.load(in_ptr2 + (local_index0 + kernel_size2 * local_index2 * kernel_size3 * kernel_size3), mask, eviction_policy='evict_last')
-    input_value3 = tl.load(in_out_ptr0 + (global_index), mask, eviction_policy='evict_last')
+    # Load data from pointers
+    current_value = tl.load(in_out_ptr0 + (x3), xmask, eviction_policy='evict_last')
+    max_value = tl.load(in_ptr0 + (x0 + ks2 * x2 * ks3 * ks3), xmask, eviction_policy='evict_last')
+    sum_exp = tl.load(in_ptr1 + (x0 + ks2 * x2 * ks3 * ks3), xmask, eviction_policy='evict_last')
+    grad_output = tl.load(in_ptr2 + (x0 + ks2 * x2 * ks3 * ks3), xmask, eviction_policy='evict_last')
+    scale_factor = tl.load(in_ptr3 + (x3), xmask, eviction_policy='evict_last')
 
+    # Initialize temporary variables
     lower_bound = 0.0
     upper_bound = 1.0
 
-    is_ge_lower = output_value >= lower_bound
-    is_le_upper = output_value <= upper_bound
+    # Clamp current value between lower and upper bounds
+    is_ge_lower = current_value >= lower_bound
+    is_le_upper = current_value <= upper_bound
     is_within_bounds = is_ge_lower & is_le_upper
 
-    clamped_value = triton_helpers.maximum(output_value, lower_bound)
+    # Apply clamping
+    clamped_value = triton_helpers.maximum(current_value, lower_bound)
     clamped_value = triton_helpers.minimum(clamped_value, upper_bound)
 
-    adjusted_value = clamped_value - input_value0
+    # Compute softmax backward pass
+    adjusted_value = clamped_value - max_value
     exp_value = tl.math.exp(adjusted_value)
-    normalized_value = exp_value / input_value1
-    neg_normalized_value = -normalized_value
+    softmax_grad = exp_value / sum_exp
+    neg_softmax_grad = -softmax_grad
 
-    scale_factor = 2.0
-    scaled_input_value3 = input_value3 * scale_factor
-    scaled_normalized_value = scaled_input_value3 * normalized_value
+    # Compute final gradient
+    scale_multiplier = 2.0
+    scaled_grad = scale_factor * scale_multiplier * softmax_grad
+    final_grad = tl.extra.cuda.libdevice.fma(neg_softmax_grad, grad_output, scaled_grad)
 
-    fused_value = tl.extra.cuda.libdevice.fma(neg_normalized_value, input_value2, scaled_normalized_value)
-
-    final_value = tl.where(is_within_bounds, fused_value, lower_bound)
-
-    tl.store(in_out_ptr0 + (global_index), final_value, mask)
+    # Store the result
+    result_value = tl.where(is_within_bounds, final_grad, lower_bound)
+    tl.store(in_out_ptr0 + (x3), result_value, xmask)

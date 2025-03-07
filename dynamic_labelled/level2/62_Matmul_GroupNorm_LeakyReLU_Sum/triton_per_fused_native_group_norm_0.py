@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_native_group_norm_0per_fused_native_group_norm_0(in_out_ptr0, in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
+def triton_per_fused_native_group_norm_0(in_out_ptr0, in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 32
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
@@ -32,8 +32,8 @@ def triton_per_fused_native_group_norm_0per_fused_native_group_norm_0(in_out_ptr
     sum_squared = tl.sum(masked_squared, 1)[:, None]
     variance = sum_squared / 32.0
     epsilon = 1e-05
-    variance_epsilon = variance + epsilon
-    inv_std = tl.extra.cuda.libdevice.rsqrt(variance_epsilon)
+    variance_with_epsilon = variance + epsilon
+    inv_stddev = tl.extra.cuda.libdevice.rsqrt(variance_with_epsilon)
     tl.debug_barrier()
-    tl.store(in_out_ptr0 + (x0), inv_std, x_mask)
+    tl.store(in_out_ptr0 + (x0), inv_stddev, x_mask)
     tl.store(out_ptr0 + (x0), mean, x_mask)

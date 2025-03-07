@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_native_group_norm_backward_3poi_fused_native_group_norm_backward_3(
+def triton_poi_fused_native_group_norm_backward_3(
     in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, out_ptr1, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr
 ):
     offset = tl.program_id(0) * XBLOCK
@@ -50,7 +50,7 @@ def triton_poi_fused_native_group_norm_backward_3poi_fused_native_group_norm_bac
     difference = scaled_grad_output - sum5
 
     scaled_difference = difference * input3
-    cubed_scaled_difference = scaled_difference * scaled_difference * scaled_difference
+    cubed_difference = scaled_difference * scaled_difference * scaled_difference
 
     factor = 2.0
     kernel_size0_float = kernel_size0.to(tl.float32)
@@ -66,17 +66,15 @@ def triton_poi_fused_native_group_norm_backward_3poi_fused_native_group_norm_bac
     exponent1 = base + scale_factor2
     power1 = scale_factor1 * exponent1
 
-    power1_double = power1.to(tl.float64)
-    one_double = tl.full([1], 1.0, tl.float64)
-    reciprocal = one_double / power1_double
-    reciprocal_float = reciprocal.to(tl.float32)
+    divisor = tl.full([1], 1.0, tl.float64) / power1.to(tl.float64)
+    normalization_factor = divisor.to(tl.float32)
 
-    scaled_cubed_difference = cubed_scaled_difference * reciprocal_float
-    neg_scaled_cubed_difference = -scaled_cubed_difference
-    scaled_neg_difference = neg_scaled_cubed_difference * grad_output
-    scaled_sum = sum2 * input3
-    scaled_reciprocal = scaled_sum * reciprocal_float
-    final_difference = scaled_neg_difference - scaled_reciprocal
+    adjusted_difference = cubed_difference * normalization_factor
+    neg_adjusted_difference = -adjusted_difference
+    scaled_neg_adjusted_difference = neg_adjusted_difference * grad_output
+    scaled_sum2 = sum2 * input3
+    scaled_normalization_factor = scaled_sum2 * normalization_factor
+    final_adjustment = scaled_neg_adjusted_difference - scaled_normalization_factor
 
     tl.store(out_ptr1 + (element_index), difference, mask)
-    tl.store(in_out_ptr0 + (element_index), final_difference, mask)
+    tl.store(in_out_ptr0 + (element_index), final_adjustment, mask)

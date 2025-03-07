@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_sigmoid_sum_0per_fused_sigmoid_sum_0(input_ptr, output_ptr, num_elements_x, num_elements_r, XBLOCK: tl.constexpr):
+def triton_per_fused_sigmoid_sum_0(input_ptr, output_ptr, num_elements_x, num_elements_r, XBLOCK: tl.constexpr):
     num_elements_r = 20
     RBLOCK: tl.constexpr = 32
     x_offset = tl.program_id(0) * XBLOCK

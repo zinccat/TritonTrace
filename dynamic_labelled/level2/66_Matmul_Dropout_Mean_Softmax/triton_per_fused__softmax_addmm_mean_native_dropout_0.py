@@ -21,22 +21,23 @@ def triton_per_fused__softmax_addmm_mean_native_dropout_0(
     col_indices = x_indices
     input_data1 = tl.load(in_ptr1 + (row_indices + 50 * col_indices), r_mask & x_mask, other=0.0)
     input_data2 = tl.load(in_ptr2 + (row_indices), r_mask, eviction_policy='evict_last', other=0.0)
-    seed_value = tl.load(in_ptr0 + load_seed_offset)
-    rand_indices = row_indices + 50 * col_indices
-    random_values = tl.rand(seed_value, rand_indices.to(tl.uint32))
+    random_seed = tl.load(in_ptr0 + load_seed_offset)
+    index_for_random = row_indices + 50 * col_indices
+    random_values = tl.rand(random_seed, (index_for_random).to(tl.uint32))
     dropout_threshold = 0.2
     dropout_mask = random_values > dropout_threshold
     dropout_mask_float = dropout_mask.to(tl.float32)
-    dropout_output = input_data1 + input_data2
-    dropout_scaled = dropout_mask_float * dropout_output
-    dropout_scaled_up = dropout_scaled * 1.25
-    broadcast_dropout = tl.broadcast_to(dropout_scaled_up, [XBLOCK, RBLOCK])
-    masked_dropout = tl.where(r_mask & x_mask, broadcast_dropout, 0)
+    combined_data = input_data1 + input_data2
+    dropout_applied = dropout_mask_float * combined_data
+    dropout_scale = 1.25
+    scaled_dropout = dropout_applied * dropout_scale
+    broadcasted_dropout = tl.broadcast_to(scaled_dropout, [XBLOCK, RBLOCK])
+    masked_dropout = tl.where(r_mask & x_mask, broadcasted_dropout, 0)
     sum_masked_dropout = tl.sum(masked_dropout, 1)[:, None]
     normalization_factor = 50.0
     mean_values = sum_masked_dropout / normalization_factor
-    zero_shifted = mean_values - mean_values
-    exp_values = tl.math.exp(zero_shifted)
+    zeroed_mean = mean_values - mean_values
+    exp_values = tl.math.exp(zeroed_mean)
     softmax_output = exp_values / exp_values
     tl.store(out_ptr1 + (row_indices + 50 * col_indices), dropout_mask, r_mask & x_mask)
     tl.debug_barrier()

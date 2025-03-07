@@ -7,45 +7,41 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_max_pool2d_with_indices_max_pool2d_with_indices_backward_0poi_fused_max_pool2d_with_indices_max_pool2d_with_indices_backward_0(input_ptr0, input_ptr1, output_ptr0, num_elements, BLOCK_SIZE : tl.constexpr):
+def triton_poi_fused_max_pool2d_with_indices_max_pool2d_with_indices_backward_0(input_ptr0, input_ptr1, output_ptr0, num_elements, BLOCK_SIZE : tl.constexpr):
     block_offset = tl.program_id(0) * BLOCK_SIZE
-    index = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    mask = index < num_elements
-    col = index % 5
-    row = index // 5
-    linear_index = index
+    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
+    mask = block_indices < num_elements
 
-    # Load data from input_ptr0 with masking and eviction policy
-    offset0 = 2 * row + (((0) * ((0) >= (col // 2)) + (col // 2) * ((col // 2) > (0)))) * ((((0) * ((0) >= (col // 2)) + (col // 2) * ((col // 2) > (0)))) <= ((-1) + ((2) * ((2) <= (1 + (col // 2))) + (1 + (col // 2)) * ((1 + (col // 2)) < (2))))) + ((-1) + ((2) * ((2) <= (1 + (col // 2))) + (1 + (col // 2)) * ((1 + (col // 2)) < (2)))) * (((-1) + ((2) * ((2) <= (1 + (col // 2))) + (1 + (col // 2)) * ((1 + (col // 2)) < (2)))) < (((0) * ((0) >= (col // 2)) + (col // 2) * ((col // 2) > (0)))))
-    tmp0 = tl.load(input_ptr0 + offset0, mask, eviction_policy='evict_last')
+    col_index = block_indices % 5
+    row_index = block_indices // 5
+    linear_index = block_indices
 
-    # Load data from input_ptr1 with masking and eviction policy
-    tmp12 = tl.load(input_ptr1 + row, mask, eviction_policy='evict_last')
+    offset_calculation = (col_index // 2) * (col_index // 2 > 0)
+    max_offset = -1 + (2 * (2 <= (1 + (col_index // 2))) + (1 + (col_index // 2)) * ((1 + (col_index // 2)) < 2))
+    valid_offset = offset_calculation <= max_offset
+    final_offset = max_offset * (max_offset < offset_calculation)
 
-    # Calculate tmp1, tmp2, tmp3, tmp4
-    tmp1 = tl.full([1], 2, tl.int32)
-    tmp2 = tl.where((tmp0 < 0) != (tmp1 < 0), tl.where(tmp0 % tmp1 != 0, tmp0 // tmp1 - 1, tmp0 // tmp1), tmp0 // tmp1)
-    tmp3 = tmp2 * tmp1
-    tmp4 = tmp0 - tmp3
+    input_value0 = tl.load(input_ptr0 + (2 * row_index + (offset_calculation * valid_offset + final_offset)), mask, eviction_policy='evict_last')
+    input_value1 = tl.load(input_ptr1 + (row_index), mask, eviction_policy='evict_last')
 
-    # Calculate tmp5, tmp6
-    tmp5 = tl.full([1], 0, tl.int64)
-    tmp6 = tmp5 + tmp2
+    divisor = tl.full([1], 2, tl.int32)
+    quotient = tl.where((input_value0 < 0) != (divisor < 0), tl.where(input_value0 % divisor != 0, input_value0 // divisor - 1, input_value0 // divisor), input_value0 // divisor)
+    product = quotient * divisor
+    remainder = input_value0 - product
 
-    # Calculate offset for tmp7, tmp8
-    offset1 = 2 * (((0) * ((0) >= (col // 2)) + (col // 2) * ((col // 2) > (0)))) * ((((0) * ((0) >= (col // 2)) + (col // 2) * ((col // 2) > (0)))) <= ((-1) + ((2) * ((2) <= (1 + (col // 2))) + (1 + (col // 2)) * ((1 + (col // 2)) < (2))))) + ((-1) + ((2) * ((2) <= (1 + (col // 2))) + (1 + (col // 2)) * ((1 + (col // 2)) < (2)))) * (((-1) + ((2) * ((2) <= (1 + (col // 2))) + (1 + (col // 2)) * ((1 + (col // 2)) < (2)))) < (((0) * ((0) >= (col // 2)) + (col // 2) * ((col // 2) > (0)))))
-    tmp7 = offset1 + tmp4
-    tmp9 = tl.full([1], 5, tl.int64)
-    tmp10 = tmp6 * tmp9
-    tmp11 = tmp10 + tmp7
+    index_base = tl.full([1], 0, tl.int64)
+    adjusted_index = index_base + quotient
+    offset_multiplier = 2 * (offset_calculation * valid_offset + final_offset)
+    adjusted_offset = offset_multiplier + remainder
 
-    # Calculate tmp14, tmp16, tmp18
-    tmp13 = 0.5
-    tmp14 = tmp12 * tmp13
-    tmp15 = col
-    tmp16 = tmp11 == tmp15
-    tmp17 = 0.0
-    tmp18 = tl.where(tmp16, tmp14, tmp17)
+    stride = tl.full([1], 5, tl.int64)
+    linear_index_adjusted = adjusted_index * stride + adjusted_offset
 
-    # Store the result
-    tl.store(output_ptr0 + linear_index, tmp18, mask)
+    scale_factor = 0.5
+    scaled_input_value1 = input_value1 * scale_factor
+
+    comparison_index = col_index
+    condition = linear_index_adjusted == comparison_index
+
+    output_value = tl.where(condition, scaled_input_value1, tl.full([1], 0.0, tl.float32))
+    tl.store(output_ptr0 + (linear_index), output_value, mask)

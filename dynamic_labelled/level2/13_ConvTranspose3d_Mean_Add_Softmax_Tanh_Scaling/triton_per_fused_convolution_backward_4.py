@@ -7,24 +7,33 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_convolution_backward_4per_fused_convolution_backward_4(input_ptr, output_ptr, input_elements, output_elements, XBLOCK: tl.constexpr):
-    input_elements = 16
-    output_elements = 21
+def triton_per_fused_convolution_backward_4(input_ptr, output_ptr, num_elements_x, num_elements_r, XBLOCK: tl.constexpr):
+    num_elements_x = 16
+    num_elements_r = 21
     RBLOCK: tl.constexpr = 32
 
-    input_offset = tl.program_id(0) * XBLOCK
-    input_indices = input_offset + tl.arange(0, XBLOCK)[:, None]
-    input_mask = input_indices < input_elements
+    # Calculate the offset for the current program ID
+    x_offset = tl.program_id(0) * XBLOCK
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
 
-    output_indices = tl.arange(0, RBLOCK)[None, :]
-    output_mask = output_indices < output_elements
+    # Create masks for valid indices
+    x_mask = x_indices < num_elements_x
+    r_indices = tl.arange(0, RBLOCK)[None, :]
+    r_mask = r_indices < num_elements_r
 
-    output_row_indices = output_indices
-    input_col_indices = input_indices
+    # Load data from input pointer with masking
+    r_indices_adjusted = r_indices
+    x_indices_adjusted = x_indices
+    loaded_data = tl.load(input_ptr + (r_indices_adjusted + 21 * x_indices_adjusted), r_mask & x_mask, other=0.0)
 
-    loaded_values = tl.load(input_ptr + (output_row_indices + 21 * input_col_indices), output_mask & input_mask, other=0.0)
-    broadcasted_values = tl.broadcast_to(loaded_values, [XBLOCK, RBLOCK])
-    masked_values = tl.where(output_mask & input_mask, broadcasted_values, 0)
-    summed_values = tl.sum(masked_values, 1)[:, None]
+    # Broadcast loaded data to the required shape
+    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
 
-    tl.store(output_ptr + (input_col_indices), summed_values, input_mask)
+    # Apply mask and zero out invalid entries
+    masked_data = tl.where(r_mask & x_mask, broadcasted_data, 0)
+
+    # Sum along the first dimension and reshape
+    summed_data = tl.sum(masked_data, 1)[:, None]
+
+    # Store the result in the output pointer with masking
+    tl.store(output_ptr + (x_indices_adjusted), summed_data, x_mask)

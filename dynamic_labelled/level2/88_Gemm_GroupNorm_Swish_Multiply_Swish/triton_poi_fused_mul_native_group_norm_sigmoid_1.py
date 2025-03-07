@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_mul_native_group_norm_sigmoid_1poi_fused_mul_native_group_norm_sigmoid_1(
+def triton_poi_fused_mul_native_group_norm_sigmoid_1(
     in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, in_ptr4, in_ptr5, xnumel, XBLOCK: tl.constexpr
 ):
     xoffset = tl.program_id(0) * XBLOCK

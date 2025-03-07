@@ -8,8 +8,8 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_per_fused__native_batch_norm_legit_functional_2(
-    input_mean_ptr, input_var_ptr, input_x_ptr, running_mean_ptr, running_var_ptr,
-    output_mean_ptr, output_var_ptr, output_x_ptr, output_running_mean_ptr, output_running_var_ptr,
+    input_ptr_mean, input_ptr_var, input_ptr_count, input_ptr_running_mean, input_ptr_running_var,
+    output_ptr_normalized, output_ptr_running_mean, output_ptr_running_var, output_ptr_mean, output_ptr_var,
     kernel_size, num_elements, reduced_num_elements, XBLOCK: tl.constexpr
 ):
     num_elements = 32
@@ -23,53 +23,47 @@ def triton_per_fused__native_batch_norm_legit_functional_2(
     r1 = r_indices
     x0 = x_indices
 
-    # Load input data with masks
-    input_mean = tl.load(input_mean_ptr + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
-    input_var = tl.load(input_var_ptr + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
-    input_x = tl.load(input_x_ptr + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
-    running_mean = tl.load(running_mean_ptr + (x0), x_mask, eviction_policy='evict_last')
-    running_var = tl.load(running_var_ptr + (x0), x_mask, eviction_policy='evict_last')
+    mean = tl.load(input_ptr_mean + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
+    var = tl.load(input_ptr_var + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
+    count = tl.load(input_ptr_count + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
+    running_mean = tl.load(input_ptr_running_mean + (x0), x_mask, eviction_policy='evict_last')
+    running_var = tl.load(input_ptr_running_var + (x0), x_mask, eviction_policy='evict_last')
 
-    # Broadcast loaded data
-    broadcast_mean = tl.broadcast_to(input_mean, [XBLOCK, RBLOCK])
-    broadcast_var = tl.broadcast_to(input_var, [XBLOCK, RBLOCK])
-    broadcast_x = tl.broadcast_to(input_x, [XBLOCK, RBLOCK])
+    mean_broadcast = tl.broadcast_to(mean, [XBLOCK, RBLOCK])
+    var_broadcast = tl.broadcast_to(var, [XBLOCK, RBLOCK])
+    count_broadcast = tl.broadcast_to(count, [XBLOCK, RBLOCK])
 
-    # Apply masks
-    masked_mean = tl.where(r_mask & x_mask, broadcast_mean, 0)
-    masked_var = tl.where(r_mask & x_mask, broadcast_var, 0)
-    masked_x = tl.where(r_mask & x_mask, broadcast_x, 0)
+    mean_selected = tl.where(r_mask & x_mask, mean_broadcast, 0)
+    var_selected = tl.where(r_mask & x_mask, var_broadcast, 0)
+    count_selected = tl.where(r_mask & x_mask, count_broadcast, 0)
 
-    # Compute Welford's algorithm for mean and variance
-    mean, var, _ = triton_helpers.welford(masked_mean, masked_var, masked_x, 1)
+    mean_accum, var_accum, count_accum = triton_helpers.welford(mean_selected, var_selected, count_selected, 1)
+    mean_accum_expanded = mean_accum[:, None]
+    var_accum_expanded = var_accum[:, None]
 
-    # Reshape mean and variance
-    reshaped_mean = mean[:, None]
-    reshaped_var = var[:, None]
-
-    # Compute normalization parameters
-    factor = 496 + ((-1984) * kernel_size) + 1984 * kernel_size * kernel_size
-    factor_float = factor.to(tl.float32)
-    normalized_var = reshaped_var / factor_float
+    normalization_factor = 496 + ((-1984) * kernel_size) + 1984 * kernel_size * kernel_size
+    normalization_factor_float = normalization_factor.to(tl.float32)
+    mean_normalized = var_accum_expanded / normalization_factor_float
     epsilon = 1e-05
-    adjusted_var = normalized_var + epsilon
-    inv_std = tl.extra.cuda.libdevice.rsqrt(adjusted_var)
+    mean_normalized_eps = mean_normalized + epsilon
+    inv_sqrt = tl.extra.cuda.libdevice.rsqrt(mean_normalized_eps)
 
-    # Compute running variance adjustment
-    adjustment_factor = (((15872 + ((-63488) * kernel_size) + 63488 * kernel_size * kernel_size) / 32) /
-                         ((tl.full([], -1.00000000000000, tl.float64)) + 
-                         ((15872 + ((-63488) * kernel_size) + 63488 * kernel_size * kernel_size) / 32)))
-    adjustment_factor_float = adjustment_factor.to(tl.float32)
-    var_adjustment = normalized_var * adjustment_factor_float
+    variance_correction = (((15872 + ((-63488) * kernel_size) + 63488 * kernel_size * kernel_size) / 32) /
+                           ((tl.full([], -1.00000000000000, tl.float64)) + 
+                            ((15872 + ((-63488) * kernel_size) + 63488 * kernel_size * kernel_size) / 32)))
+    variance_correction_float = variance_correction.to(tl.float32)
+    mean_scaled = mean_normalized * variance_correction_float
     momentum = 0.1
-    var_momentum = var_adjustment * momentum
-    momentum_factor = 0.9
-    updated_running_mean = running_mean * momentum_factor + var_momentum
-    updated_running_var = reshaped_mean * momentum + running_var * momentum_factor
+    mean_momentum = mean_scaled * momentum
+    running_mean_momentum = running_mean * 0.9
+    updated_running_mean = mean_momentum + running_mean_momentum
 
-    # Store results
-    tl.store(output_mean_ptr + (x0), inv_std, x_mask)
-    tl.store(output_var_ptr + (x0), updated_running_mean, x_mask)
-    tl.store(output_x_ptr + (x0), updated_running_var, x_mask)
-    tl.store(output_running_mean_ptr + (x0), reshaped_mean, x_mask)
-    tl.store(output_running_var_ptr + (x0), reshaped_var, x_mask)
+    variance_momentum = mean_scaled * momentum
+    running_var_momentum = running_var * 0.9
+    updated_running_var = variance_momentum + running_var_momentum
+
+    tl.store(output_ptr_normalized + (x0), inv_sqrt, x_mask)
+    tl.store(output_ptr_running_mean + (x0), updated_running_mean, x_mask)
+    tl.store(output_ptr_running_var + (x0), updated_running_var, x_mask)
+    tl.store(output_ptr_mean + (x0), mean_accum_expanded, x_mask)
+    tl.store(output_ptr_var + (x0), var_accum_expanded, x_mask)

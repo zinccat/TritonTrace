@@ -21,21 +21,27 @@ def triton_per_fused__softmax__softmax_backward_data_clamp_mul_0(
     x0 = (x_index % kernel_size0)
     x1 = x_index // kernel_size0
     x3 = x_index
+
     input_value0 = tl.load(input_ptr0 + (x0 + kernel_size1 * r2 * kernel_size2 * kernel_size2 + 16 * kernel_size1 * x1 * kernel_size2 * kernel_size2), x_mask, eviction_policy='evict_last', other=0.0)
     input_value1 = tl.load(input_ptr1 + (x0 + kernel_size1 * r2 * kernel_size2 * kernel_size2 + 16 * kernel_size1 * x1 * kernel_size2 * kernel_size2), x_mask, eviction_policy='evict_last', other=0.0)
     input_value2 = tl.load(input_ptr2 + (x3), x_mask, eviction_policy='evict_last')
     input_value3 = tl.load(input_ptr3 + (x3), x_mask, eviction_policy='evict_last')
+
     scale_factor = 2.0
     scaled_value0 = input_value0 * scale_factor
+
     clamp_min = 0.0
-    clamped_value = triton_helpers.maximum(input_value1, clamp_min)
+    clamped_value1 = triton_helpers.maximum(input_value1, clamp_min)
     clamp_max = 1.0
-    clamped_value = triton_helpers.minimum(clamped_value, clamp_max)
-    exponent_base = clamped_value - input_value2
-    exp_value = tl.math.exp(exponent_base)
-    softmax_value = exp_value / input_value3
-    result_value = scaled_value0 * softmax_value
-    broadcasted_result = tl.broadcast_to(result_value, [XBLOCK, RBLOCK])
+    clamped_value = triton_helpers.minimum(clamped_value1, clamp_max)
+
+    exp_input = clamped_value - input_value2
+    exp_result = tl.math.exp(exp_input)
+    softmax_result = exp_result / input_value3
+
+    multiplied_result = scaled_value0 * softmax_result
+    broadcasted_result = tl.broadcast_to(multiplied_result, [XBLOCK, RBLOCK])
     masked_result = tl.where(x_mask, broadcasted_result, 0)
     summed_result = tl.sum(masked_result, 1)[:, None]
+
     tl.store(output_ptr0 + (x3), summed_result, x_mask)

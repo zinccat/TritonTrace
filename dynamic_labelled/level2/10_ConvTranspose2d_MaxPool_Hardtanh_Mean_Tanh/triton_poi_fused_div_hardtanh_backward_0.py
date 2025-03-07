@@ -7,26 +7,26 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_div_hardtanh_backward_0poi_fused_div_hardtanh_backward_0(input_ptr0, input_ptr1, input_ptr2, output_ptr0, kernel_size, num_elements, XBLOCK: tl.constexpr):
+def triton_poi_fused_div_hardtanh_backward_0(input_grad_ptr, input_data_ptr, input_mask_ptr, output_grad_ptr, kernel_size, num_elements, XBLOCK: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
-    index = offset + tl.arange(0, XBLOCK)[:]
-    mask = index < num_elements
-    element_index = index
-    input_index = index // kernel_size
+    indices = offset + tl.arange(0, XBLOCK)[:]
+    mask = indices < num_elements
+    element_indices = indices
+    input_indices = indices // kernel_size
     
-    input_value0 = tl.load(input_ptr0 + (element_index), mask, eviction_policy='evict_last').to(tl.int1)
-    input_value1 = tl.load(input_ptr1 + (input_index), mask, eviction_policy='evict_last')
-    input_value2 = tl.load(input_ptr2 + (input_index), mask, eviction_policy='evict_last')
+    grad_mask = tl.load(input_grad_ptr + (element_indices), mask, eviction_policy='evict_last').to(tl.int1)
+    input_data = tl.load(input_data_ptr + (input_indices), mask, eviction_policy='evict_last')
+    input_mask = tl.load(input_mask_ptr + (input_indices), mask, eviction_policy='evict_last')
     
-    squared_value2 = input_value2 * input_value2
+    mask_squared = input_mask * input_mask
     one = 1.0
-    subtracted_value = one - squared_value2
-    multiplied_value = input_value1 * subtracted_value
+    mask_complement = one - mask_squared
     
+    scaled_grad = input_data * mask_complement
     kernel_size_float = kernel_size.to(tl.float32)
-    divided_value = multiplied_value / kernel_size_float
+    normalized_grad = scaled_grad / kernel_size_float
     
     zero = 0.0
-    conditional_value = tl.where(input_value0, zero, divided_value)
+    final_grad = tl.where(grad_mask, zero, normalized_grad)
     
-    tl.store(output_ptr0 + (element_index), conditional_value, mask)
+    tl.store(output_grad_ptr + (element_indices), final_grad, mask)

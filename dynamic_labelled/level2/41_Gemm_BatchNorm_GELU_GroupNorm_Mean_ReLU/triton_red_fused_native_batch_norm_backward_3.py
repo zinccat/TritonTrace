@@ -8,44 +8,42 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_red_fused_native_batch_norm_backward_3(
-    input_grad_ptr, input_ptr, mean_ptr, variance_ptr, output_grad_ptr, output_mean_ptr, output_var_ptr, 
+    input_grad_ptr, mean_ptr, variance_ptr, input_ptr, output_grad_mean_ptr, output_grad_var_ptr, output_grad_input_ptr, 
     xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
     xnumel = 1024
-    x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_index < xnumel
-    r_base = tl.arange(0, RBLOCK)[None, :]
-    x0 = x_index
-    temp_sum_grad = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    temp_sum_grad_squared = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:, None]
+    xmask = xindex < xnumel
+    rbase = tl.arange(0, RBLOCK)[None, :]
+    x_indices = xindex
+    temp_sum_mean = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    input_grad = tl.load(input_grad_ptr + (x_indices), xmask, eviction_policy='evict_last')
+    temp_sum_var = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
     
-    mean_values = tl.load(mean_ptr + (x0), x_mask, eviction_policy='evict_last')
-    
-    for r_offset in range(0, rnumel, RBLOCK):
-        r_index = r_offset + r_base
-        r_mask = r_index < rnumel
-        r1 = r_index
-        input_values = tl.load(input_ptr + (x0 + 1024 * r1), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
-        grad_values = tl.load(input_grad_ptr + (x0 + 1024 * r1), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
+    for roffset in range(0, rnumel, RBLOCK):
+        rindex = roffset + rbase
+        rmask = rindex < rnumel
+        r_indices = rindex
+        grad_input = tl.load(input_grad_ptr + (x_indices + 1024 * r_indices), rmask & xmask, eviction_policy='evict_first', other=0.0)
+        grad_output = tl.load(mean_ptr + (x_indices + 1024 * r_indices), rmask & xmask, eviction_policy='evict_first', other=0.0)
         
-        broadcast_input = tl.broadcast_to(input_values, [XBLOCK, RBLOCK])
-        temp_sum_grad += broadcast_input
-        temp_sum_grad = tl.where(r_mask & x_mask, temp_sum_grad, temp_sum_grad)
+        broadcast_grad_input = tl.broadcast_to(grad_input, [XBLOCK, RBLOCK])
+        temp_sum_mean += broadcast_grad_input
+        temp_sum_mean = tl.where(rmask & xmask, temp_sum_mean, temp_sum_mean)
         
-        grad_diff = grad_values - mean_values
-        grad_diff_scaled = input_values * grad_diff
-        broadcast_grad_diff_scaled = tl.broadcast_to(grad_diff_scaled, [XBLOCK, RBLOCK])
-        temp_sum_grad_squared += broadcast_grad_diff_scaled
-        temp_sum_grad_squared = tl.where(r_mask & x_mask, temp_sum_grad_squared, temp_sum_grad_squared)
+        grad_diff = grad_output - input_grad
+        grad_input_diff = grad_input * grad_diff
+        broadcast_grad_input_diff = tl.broadcast_to(grad_input_diff, [XBLOCK, RBLOCK])
+        temp_sum_var += broadcast_grad_input_diff
+        temp_sum_var = tl.where(rmask & xmask, temp_sum_var, temp_sum_var)
     
-    output_mean = tl.sum(temp_sum_grad, 1)[:, None]
-    output_var = tl.sum(temp_sum_grad_squared, 1)[:, None]
+    sum_mean = tl.sum(temp_sum_mean, 1)[:, None]
+    sum_var = tl.sum(temp_sum_var, 1)[:, None]
     
-    tl.store(output_mean_ptr + (x0), output_mean, x_mask)
-    tl.store(output_var_ptr + (x0), output_var, x_mask)
+    tl.store(output_grad_mean_ptr + (x_indices), sum_mean, xmask)
+    tl.store(output_grad_var_ptr + (x_indices), sum_var, xmask)
     
-    variance_values = tl.load(variance_ptr + (x0), x_mask, eviction_policy='evict_last')
-    output_var_scaled = output_var * variance_values
-    
-    tl.store(output_grad_ptr + (x0), output_var_scaled, x_mask)
+    input = tl.load(input_ptr + (x_indices), xmask, eviction_policy='evict_last')
+    output_grad_input = sum_var * input
+    tl.store(output_grad_input_ptr + (x_indices), output_grad_input, xmask)

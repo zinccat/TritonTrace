@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_leaky_relu_leaky_relu_backward_mul_sum_1per_fused_leaky_relu_leaky_relu_backward_mul_sum_1(input_ptr, output_ptr, input_num_elements, result_num_elements, INPUT_BLOCK: tl.constexpr):
+def triton_per_fused_leaky_relu_leaky_relu_backward_mul_sum_1(input_ptr, output_ptr, input_num_elements, result_num_elements, INPUT_BLOCK: tl.constexpr):
     input_num_elements = 32
     result_num_elements = 11
     RESULT_BLOCK: tl.constexpr = 16

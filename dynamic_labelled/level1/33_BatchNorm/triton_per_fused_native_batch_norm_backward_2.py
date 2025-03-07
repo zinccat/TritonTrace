@@ -7,9 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_native_batch_norm_backward_2(
-    in_out_ptr0, in_ptr0, in_ptr1, xnumel, rnumel, XBLOCK: tl.constexpr
-):
+def triton_per_fused_native_batch_norm_backward_2(in_out_ptr0, in_ptr0, in_ptr1, xnumel, rnumel, XBLOCK: tl.constexpr):
     xnumel = 64
     rnumel = 6
     RBLOCK: tl.constexpr = 8

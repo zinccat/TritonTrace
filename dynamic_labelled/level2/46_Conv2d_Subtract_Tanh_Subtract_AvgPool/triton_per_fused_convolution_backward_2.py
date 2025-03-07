@@ -22,16 +22,18 @@ def triton_per_fused_convolution_backward_2(in_ptr0, out_ptr0, xnumel, rnumel, X
     output_mask = output_indices < rnumel
     
     # Load input data with masking
-    input_data = tl.load(in_ptr0 + (input_indices + 16 * output_indices), output_mask & input_mask, other=0.0)
+    input_row_indices = output_indices
+    input_col_indices = input_indices
+    loaded_data = tl.load(in_ptr0 + (input_col_indices + 16 * input_row_indices), output_mask & input_mask, other=0.0)
     
-    # Broadcast the loaded data to the required shape
-    broadcasted_data = tl.broadcast_to(input_data, [XBLOCK, RBLOCK])
+    # Broadcast loaded data to match dimensions
+    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
     
-    # Apply mask and zero out elements outside the mask
+    # Apply mask and zero out where necessary
     masked_data = tl.where(output_mask & input_mask, broadcasted_data, 0)
     
     # Sum along the output dimension
     summed_data = tl.sum(masked_data, 1)[:, None]
     
     # Store the result back to the output pointer
-    tl.store(out_ptr0 + (input_indices), summed_data, input_mask)
+    tl.store(out_ptr0 + (input_col_indices), summed_data, input_mask)

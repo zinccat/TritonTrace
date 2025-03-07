@@ -20,44 +20,43 @@ def triton_per_fused_mean_native_group_norm_relu_threshold_backward_2(
     r1 = rindex
     x0 = xindex
 
-    # Load input data
-    input_data = tl.load(in_ptr0 + (r1 + 1024 * x0), None)
-    batch_norm_mean = tl.load(in_ptr1 + (8 * x0 + (r1 // 128)), None, eviction_policy='evict_last')
-    batch_norm_var = tl.load(in_ptr2 + (8 * x0 + (r1 // 128)), None, eviction_policy='evict_last')
-    group_norm_weight = tl.load(in_ptr3 + (r1), None, eviction_policy='evict_last')
-    group_norm_bias = tl.load(in_ptr4 + (r1), None, eviction_policy='evict_last')
+    # Load input tensors
+    input_tensor0 = tl.load(in_ptr0 + (r1 + 1024 * x0), None)
+    input_tensor1 = tl.load(in_ptr1 + (8 * x0 + (r1 // 128)), None, eviction_policy='evict_last')
+    input_tensor2 = tl.load(in_ptr2 + (8 * x0 + (r1 // 128)), None, eviction_policy='evict_last')
+    input_tensor3 = tl.load(in_ptr3 + (r1), None, eviction_policy='evict_last')
+    input_tensor4 = tl.load(in_ptr4 + (r1), None, eviction_policy='evict_last')
 
-    # Compute GELU
+    # Constants
     half = 0.5
-    sqrt_2_over_sqrt_pi = 0.7071067811865476
-    gelu_input = input_data * half
-    erf_input = input_data * sqrt_2_over_sqrt_pi
-    erf_result = tl.extra.cuda.libdevice.erf(erf_input)
-    gelu_result = gelu_input * (erf_result + 1.0)
-
-    # Compute BatchNorm
-    batch_norm_delta = gelu_result - batch_norm_mean
-    batch_norm_scale = batch_norm_var / 128.0
+    sqrt2_inv = 0.7071067811865476
+    one = 1.0
+    sqrt128_inv = 128.0
     epsilon = 1e-05
-    batch_norm_denom = batch_norm_scale + epsilon
-    batch_norm_inv_denom = tl.extra.cuda.libdevice.rsqrt(batch_norm_denom)
-    batch_norm_output = batch_norm_delta * batch_norm_inv_denom
+    block_size = 1024.0
+    zero = 0.0
 
-    # Compute GroupNorm
-    group_norm_output = batch_norm_output * group_norm_weight + group_norm_bias
+    # Computation
+    scaled_input = input_tensor0 * half
+    erf_input = input_tensor0 * sqrt2_inv
+    erf_result = tl.extra.cuda.libdevice.erf(erf_input)
+    scaled_erf = scaled_input * (erf_result + one)
+    diff = scaled_erf - input_tensor1
+    mean = input_tensor2 / sqrt128_inv
+    mean_plus_epsilon = mean + epsilon
+    rsqrt = tl.extra.cuda.libdevice.rsqrt(mean_plus_epsilon)
+    normalized_diff = diff * rsqrt
+    weighted_diff = normalized_diff * input_tensor3
+    result = weighted_diff + input_tensor4
 
-    # Compute mean across RBLOCK
-    group_norm_output_broadcast = tl.broadcast_to(group_norm_output, [RBLOCK])
-    group_norm_output_sum = triton_helpers.promote_to_tensor(tl.sum(group_norm_output_broadcast, 0))
-    mean_value = group_norm_output_sum / 1024.0
-
-    # Thresholding
-    zero = tl.full([1], 0, tl.int32)
-    max_mean_value = triton_helpers.maximum(zero, mean_value)
-    threshold = 0.0
-    is_below_threshold = max_mean_value <= threshold
+    # Broadcast and reduce
+    broadcast_result = tl.broadcast_to(result, [RBLOCK])
+    sum_result = triton_helpers.promote_to_tensor(tl.sum(broadcast_result, 0))
+    mean_result = sum_result / block_size
+    max_result = triton_helpers.maximum(tl.full([1], 0, tl.int32), mean_result)
+    threshold_condition = max_result <= zero
 
     # Store results
     tl.debug_barrier()
-    tl.store(in_out_ptr0 + (x0), max_mean_value, None)
-    tl.store(out_ptr0 + (x0), is_below_threshold, None)
+    tl.store(in_out_ptr0 + (x0), max_result, None)
+    tl.store(out_ptr0 + (x0), threshold_condition, None)

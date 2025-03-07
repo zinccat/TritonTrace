@@ -7,13 +7,13 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_mul_5poi_fused_mul_5(input_ptr0, input_ptr1, output_ptr0, kernel_size, num_elements, BLOCK_SIZE : tl.constexpr):
-    block_offset = tl.program_id(0) * BLOCK_SIZE
-    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
-    linear_index = block_indices
-    group_index = (block_indices // kernel_size) % 16
-    input_data0 = tl.load(input_ptr0 + (linear_index), valid_mask, eviction_policy='evict_last')
-    input_data1 = tl.load(input_ptr1 + (group_index), valid_mask, eviction_policy='evict_last')
-    result_data = input_data0 * input_data1
-    tl.store(output_ptr0 + (linear_index), result_data, valid_mask)
+def triton_poi_fused_mul_5(input_ptr0, input_ptr1, output_ptr0, kernel_size0, num_elements, XBLOCK: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    index = offset + tl.arange(0, XBLOCK)[:]
+    mask = index < num_elements
+    linear_index = index
+    group_index = (index // kernel_size0) % 16
+    loaded_input0 = tl.load(input_ptr0 + (linear_index), mask, eviction_policy='evict_last')
+    loaded_input1 = tl.load(input_ptr1 + (group_index), mask, eviction_policy='evict_last')
+    multiplied_result = loaded_input0 * loaded_input1
+    tl.store(output_ptr0 + (linear_index), multiplied_result, mask)

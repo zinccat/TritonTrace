@@ -7,14 +7,12 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_native_group_norm_backward_0per_fused_native_group_norm_backward_0(
-    input_grad_ptr, input_ptr, output_grad_ptr, output_ptr, xnumel, rnumel
-):
+def triton_per_fused_native_group_norm_backward_0(input_grad_ptr, input_ptr, output_grad_ptr, output_ptr, xnumel, rnumel):
     XBLOCK: tl.constexpr = 1
     RBLOCK: tl.constexpr = 1024
     x_offset = tl.program_id(0) * XBLOCK
     x_index = tl.full([1], x_offset, tl.int32)
-    r_block_full = tl.full([RBLOCK], True, tl.int1)
+    r_block_mask = tl.full([RBLOCK], True, tl.int1)
     r_index = tl.arange(0, RBLOCK)[:]
     r1 = r_index
     x0 = x_index

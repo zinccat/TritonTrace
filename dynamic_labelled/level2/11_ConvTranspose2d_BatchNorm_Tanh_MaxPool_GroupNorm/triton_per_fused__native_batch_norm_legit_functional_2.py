@@ -10,16 +10,16 @@ triton_helpers.set_driver_to_gpu()
 def triton_per_fused__native_batch_norm_legit_functional_2(
     input_mean_ptr, input_var_ptr, input_x_ptr, running_mean_ptr, running_var_ptr,
     output_mean_ptr, output_var_ptr, output_x_ptr, output_running_mean_ptr, output_running_var_ptr,
-    kernel_size, num_elements, num_running_elements, XBLOCK: tl.constexpr
+    kernel_size, input_num_elements, running_num_elements, XBLOCK: tl.constexpr
 ):
-    num_elements = 64
-    num_running_elements = 6
+    input_num_elements = 64
+    running_num_elements = 6
     RBLOCK: tl.constexpr = 8
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < num_elements
+    x_mask = x_indices < input_num_elements
     r_indices = tl.arange(0, RBLOCK)[None, :]
-    r_mask = r_indices < num_running_elements
+    r_mask = r_indices < running_num_elements
     r1 = r_indices
     x0 = x_indices
 

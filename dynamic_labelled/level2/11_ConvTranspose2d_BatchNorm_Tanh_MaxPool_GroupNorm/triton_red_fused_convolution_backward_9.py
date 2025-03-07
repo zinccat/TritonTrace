@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_backward_9(in_ptr0, out_ptr0, kernel_size, input_num_elements, output_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+def triton_red_fused_convolution_backward_9(input_ptr, output_ptr, kernel_size, input_num_elements, output_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
     input_num_elements = 384
     input_offset = tl.program_id(0) * XBLOCK
     input_indices = input_offset + tl.arange(0, XBLOCK)[:, None]
@@ -26,7 +26,7 @@ def triton_red_fused_convolution_backward_9(in_ptr0, out_ptr0, kernel_size, inpu
         max_temp_index = 4096 * kernel_size
         valid_temp_index = temp_index < max_temp_index
         temp_load = tl.load(
-            in_ptr0 + (4096 * input_index_mod + 262144 * (((temp_index // 4096) % kernel_size)) + (temp_index % 4096)),
+            input_ptr + (4096 * input_index_mod + 262144 * (((temp_index // 4096) % kernel_size)) + (temp_index % 4096)),
             valid_temp_index & output_mask & input_mask,
             eviction_policy='evict_last',
             other=0.0
@@ -36,4 +36,4 @@ def triton_red_fused_convolution_backward_9(in_ptr0, out_ptr0, kernel_size, inpu
         temp_accumulator = tl.where(output_mask & input_mask, temp_accumulator, temp_accumulator)
 
     temp_sum = tl.sum(temp_accumulator, 1)[:, None]
-    tl.store(out_ptr0 + (input_index), temp_sum, input_mask)
+    tl.store(output_ptr + (input_index), temp_sum, input_mask)

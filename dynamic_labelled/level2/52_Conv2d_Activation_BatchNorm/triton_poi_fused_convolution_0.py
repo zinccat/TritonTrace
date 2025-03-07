@@ -7,15 +7,15 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_convolution_0poi_fused_convolution_0(output_ptr, input_ptr, kernel_size, num_elements, BLOCK_SIZE : tl.constexpr):
-    block_offset = tl.program_id(0) * BLOCK_SIZE
-    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
-    linear_index = block_indices
-    channel_index = ((block_indices // kernel_size) % 16)
+def triton_poi_fused_convolution_0(output_ptr, input_ptr, kernel_size, num_elements, XBLOCK: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    indices = offset + tl.arange(0, XBLOCK)[:]
+    mask = indices < num_elements
+    linear_index = indices
+    channel_index = ((indices // kernel_size) % 16)
     
-    output_values = tl.load(output_ptr + (linear_index), valid_mask, eviction_policy='evict_last')
-    input_values = tl.load(input_ptr + (channel_index), valid_mask, eviction_policy='evict_last')
+    output_value = tl.load(output_ptr + (linear_index), mask, eviction_policy='evict_last')
+    input_value = tl.load(input_ptr + (channel_index), mask, eviction_policy='evict_last')
+    result_value = output_value + input_value
     
-    result_values = output_values + input_values
-    tl.store(output_ptr + (linear_index), result_values, valid_mask)
+    tl.store(output_ptr + (linear_index), result_value, mask)

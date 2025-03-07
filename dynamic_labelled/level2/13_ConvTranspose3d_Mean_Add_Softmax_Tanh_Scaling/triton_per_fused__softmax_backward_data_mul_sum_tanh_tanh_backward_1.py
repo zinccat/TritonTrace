@@ -8,7 +8,7 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_per_fused__softmax_backward_data_mul_sum_tanh_tanh_backward_1(
-    in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr
+    input_ptr, output_ptr, xnumel, rnumel, XBLOCK: tl.constexpr
 ):
     rnumel = 241
     RBLOCK: tl.constexpr = 256
@@ -18,8 +18,8 @@ def triton_per_fused__softmax_backward_data_mul_sum_tanh_tanh_backward_1(
     r_indices = tl.arange(0, RBLOCK)[None, :]
     r_mask = r_indices < rnumel
     r0 = r_indices
-    loaded_values = tl.load(in_ptr0 + (r0), r_mask, other=0.0)
+    loaded_values = tl.load(input_ptr + (r0), r_mask, other=0.0)
     broadcasted_values = tl.broadcast_to(loaded_values, [XBLOCK, RBLOCK])
     masked_values = tl.where(r_mask, broadcasted_values, 0)
-    sum_values = tl.sum(masked_values, 1)[:, None]
-    tl.store(out_ptr0 + (tl.full([XBLOCK, 1], 0, tl.int32)), sum_values, None)
+    summed_values = tl.sum(masked_values, 1)[:, None]
+    tl.store(output_ptr + (tl.full([XBLOCK, 1], 0, tl.int32)), summed_values, None)

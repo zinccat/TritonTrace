@@ -7,9 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_convolution_min_mul_0(
-    in_ptr0, in_ptr1, out_ptr0, out_ptr1, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr
-):
+def triton_per_fused_convolution_min_mul_0(in_ptr0, in_ptr1, out_ptr0, out_ptr1, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 16
     x_offset = tl.program_id(0) * XBLOCK
     x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
@@ -20,12 +18,7 @@ def triton_per_fused_convolution_min_mul_0(
     x3 = (x_index % kernel_size0)
     x4 = x_index // kernel_size0
     x5 = x_index
-    tmp0 = tl.load(
-        in_ptr0 + (x3 + 4 * r2 + 64 * x4 + r2 * kernel_size1 * kernel_size1 + (-64) * kernel_size1 * x4 + (-4) * kernel_size1 * r2 + 16 * x4 * kernel_size1 * kernel_size1),
-        x_mask,
-        eviction_policy='evict_last',
-        other=0.0
-    )
+    tmp0 = tl.load(in_ptr0 + (x3 + 4*r2 + 64*x4 + r2*kernel_size1*kernel_size1 + ((-64)*kernel_size1*x4) + ((-4)*kernel_size1*r2) + 16*x4*kernel_size1*kernel_size1), x_mask, eviction_policy='evict_last', other=0.0)
     tmp1 = tl.load(in_ptr1 + (r2), None, eviction_policy='evict_last')
     tmp2 = tmp0 + tmp1
     tmp3 = 2.0

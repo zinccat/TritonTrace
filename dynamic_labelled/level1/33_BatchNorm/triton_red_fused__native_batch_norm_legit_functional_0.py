@@ -8,7 +8,7 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_red_fused__native_batch_norm_legit_functional_0(
-    input_ptr, output_mean_ptr, output_variance_ptr, output_count_ptr, kernel_size_0, kernel_size_1, num_elements_x, num_elements_r, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
+    input_ptr, output_mean_ptr, output_variance_ptr, output_weight_ptr, kernel_size_0, kernel_size_1, num_elements_x, num_elements_r, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
     num_elements_x = 384
     x_offset = tl.program_id(0) * XBLOCK
@@ -28,29 +28,29 @@ def triton_red_fused__native_batch_norm_legit_functional_0(
         r_flat_index = r_index
         temp_index = r_flat_index + x_channel * ((5 + kernel_size_0 * kernel_size_1 * kernel_size_1) // 6)
         total_elements = kernel_size_0 * kernel_size_1 * kernel_size_1
-        within_bounds = temp_index < total_elements
-        loaded_values = tl.load(
+        valid_index = temp_index < total_elements
+        input_value = tl.load(
             input_ptr + (
                 x_within_channel * kernel_size_1 * kernel_size_1 +
                 64 * kernel_size_1 * kernel_size_1 * (((temp_index // (kernel_size_1 * kernel_size_1)) % kernel_size_0)) +
                 (temp_index % (kernel_size_1 * kernel_size_1))
             ),
-            r_mask & within_bounds & x_mask,
+            valid_index & x_mask,
             eviction_policy='evict_last',
             other=0.0
         )
         zero_value = 0.0
         zero_broadcast = tl.full(zero_value.shape, 0, zero_value.dtype)
-        zero_condition = tl.where(within_bounds, zero_value, zero_broadcast)
+        zero_condition = tl.where(valid_index, zero_value, zero_broadcast)
         one_value = 1.0
         one_broadcast = tl.full(one_value.shape, 0, one_value.dtype)
-        one_condition = tl.where(within_bounds, one_value, one_broadcast)
-        broadcasted_values = tl.broadcast_to(loaded_values, [XBLOCK, RBLOCK])
-        broadcasted_zeros = tl.broadcast_to(zero_condition, [XBLOCK, RBLOCK])
-        broadcasted_ones = tl.broadcast_to(one_condition, [XBLOCK, RBLOCK])
+        one_condition = tl.where(valid_index, one_value, one_broadcast)
+        input_broadcast = tl.broadcast_to(input_value, [XBLOCK, RBLOCK])
+        zero_condition_broadcast = tl.broadcast_to(zero_condition, [XBLOCK, RBLOCK])
+        one_condition_broadcast = tl.broadcast_to(one_condition, [XBLOCK, RBLOCK])
         temp_mean_next, temp_m2_next, temp_weight_next = triton_helpers.welford_combine(
             temp_mean, temp_m2, temp_weight,
-            broadcasted_values, broadcasted_zeros, broadcasted_ones
+            input_broadcast, zero_condition_broadcast, one_condition_broadcast
         )
         temp_mean = tl.where(r_mask & x_mask, temp_mean_next, temp_mean)
         temp_m2 = tl.where(r_mask & x_mask, temp_m2_next, temp_m2)
@@ -59,9 +59,9 @@ def triton_red_fused__native_batch_norm_legit_functional_0(
     final_mean, final_m2, final_weight = triton_helpers.welford(
         temp_mean, temp_m2, temp_weight, 1
     )
-    final_mean = final_mean[:, None]
-    final_m2 = final_m2[:, None]
-    final_weight = final_weight[:, None]
-    tl.store(output_mean_ptr + (x_flat_index), final_mean, x_mask)
-    tl.store(output_variance_ptr + (x_flat_index), final_m2, x_mask)
-    tl.store(output_count_ptr + (x_flat_index), final_weight, x_mask)
+    final_mean_broadcast = final_mean[:, None]
+    final_m2_broadcast = final_m2[:, None]
+    final_weight_broadcast = final_weight[:, None]
+    tl.store(output_mean_ptr + (x_flat_index), final_mean_broadcast, x_mask)
+    tl.store(output_variance_ptr + (x_flat_index), final_m2_broadcast, x_mask)
+    tl.store(output_weight_ptr + (x_flat_index), final_weight_broadcast, x_mask)

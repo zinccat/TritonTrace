@@ -7,35 +7,27 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_clamp_div_mul_relu_1poi_fused_add_clamp_div_mul_relu_1(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+def triton_poi_fused_add_clamp_div_mul_relu_1(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]
     xmask = xindex < xnumel
     x0 = xindex
 
-    # Load input values
     input_values = tl.load(in_ptr0 + (x0), xmask)
+    zero_value = tl.full([1], 0, tl.int32)
+    max_with_zero = triton_helpers.maximum(zero_value, input_values)
 
-    # Initialize constants
-    zero = tl.full([1], 0, tl.int32)
-    three = 3.0
-    one_sixth = 0.16666666666666666
-    zero_float = 0.0
-    one = 1.0
+    add_constant = 3.0
+    added_values = max_with_zero + add_constant
 
-    # Apply ReLU (max with zero)
-    relu_output = triton_helpers.maximum(zero, input_values)
+    multiply_constant = 0.16666666666666666
+    multiplied_values = added_values * multiply_constant
 
-    # Add constant and scale
-    add_result = relu_output + three
-    scaled_result = add_result * one_sixth
+    clamp_min = 0.0
+    max_with_clamp_min = triton_helpers.maximum(multiplied_values, clamp_min)
 
-    # Clamp between 0 and 1
-    clamped_result = triton_helpers.maximum(scaled_result, zero_float)
-    clamped_result = triton_helpers.minimum(clamped_result, one)
+    clamp_max = 1.0
+    clamped_values = triton_helpers.minimum(max_with_clamp_min, clamp_max)
 
-    # Multiply with original ReLU output
-    final_result = relu_output * clamped_result
-
-    # Store the result
-    tl.store(out_ptr0 + (x0), final_result, xmask)
+    final_output = max_with_zero * clamped_values
+    tl.store(out_ptr0 + (x0), final_output, xmask)

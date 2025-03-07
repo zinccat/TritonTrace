@@ -7,25 +7,23 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_mean_pow_0red_fused_mean_pow_0(input_ptr, output_ptr, kernel_size_0, kernel_size_1, kernel_size_2, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
-    input_offset = tl.program_id(0) * XBLOCK
-    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
-    input_mask = input_index < input_num_elements
-    reduction_base = tl.arange(0, RBLOCK)[None, :]
-    input_x0 = (input_index % kernel_size_0)
-    input_x1 = input_index // kernel_size_0
-    temp_accumulator = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    input_x3 = input_index
-
-    for reduction_offset in range(0, reduction_num_elements, RBLOCK):
-        reduction_index = reduction_offset + reduction_base
-        reduction_mask = reduction_index < reduction_num_elements
-        reduction_r2 = reduction_index
-        temp0 = tl.load(input_ptr + (input_x0 + reduction_r2 * kernel_size_2 * kernel_size_2 + kernel_size_1 * input_x1 * kernel_size_2 * kernel_size_2), reduction_mask & input_mask, eviction_policy='evict_last', other=0.0)
-        temp1 = temp0 * temp0
-        temp2 = tl.broadcast_to(temp1, [XBLOCK, RBLOCK])
-        temp4 = temp_accumulator + temp2
-        temp_accumulator = tl.where(reduction_mask & input_mask, temp4, temp_accumulator)
-
-    temp3 = tl.sum(temp_accumulator, 1)[:, None]
-    tl.store(output_ptr + (input_x3), temp3, input_mask)
+def triton_red_fused_mean_pow_0(in_ptr0, out_ptr0, ks0, ks1, ks2, xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+    x_offset = tl.program_id(0) * XBLOCK
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
+    x_mask = x_indices < xnumel
+    r_base = tl.arange(0, RBLOCK)[None, :]
+    x0 = (x_indices % ks0)
+    x1 = x_indices // ks0
+    temp_sum = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    x3 = x_indices
+    for r_offset in range(0, rnumel, RBLOCK):
+        r_indices = r_offset + r_base
+        r_mask = r_indices < rnumel
+        r2 = r_indices
+        loaded_values = tl.load(in_ptr0 + (x0 + r2 * ks2 * ks2 + ks1 * x1 * ks2 * ks2), r_mask & x_mask, eviction_policy='evict_last', other=0.0)
+        squared_values = loaded_values * loaded_values
+        broadcasted_values = tl.broadcast_to(squared_values, [XBLOCK, RBLOCK])
+        temp_sum_update = temp_sum + broadcasted_values
+        temp_sum = tl.where(r_mask & x_mask, temp_sum_update, temp_sum)
+    summed_values = tl.sum(temp_sum, 1)[:, None]
+    tl.store(out_ptr0 + (x3), summed_values, x_mask)

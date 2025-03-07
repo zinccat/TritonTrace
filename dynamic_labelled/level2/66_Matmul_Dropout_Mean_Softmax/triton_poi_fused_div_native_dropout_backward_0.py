@@ -7,32 +7,29 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_div_native_dropout_backward_0poi_fused_div_native_dropout_backward_0(
-    input_grad_ptr, dropout_mask_ptr, dropout_mask_bool_ptr, output_grad_ptr, num_elements, BLOCK_SIZE: tl.constexpr
+def triton_poi_fused_div_native_dropout_backward_0(
+    input_grad_ptr, dropout_mask_ptr, dropout_mask_bool_ptr, output_grad_ptr, num_elements, XBLOCK: tl.constexpr
 ):
-    block_offset = tl.program_id(0) * BLOCK_SIZE
-    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
+    offset = tl.program_id(0) * XBLOCK
+    indices = offset + tl.arange(0, XBLOCK)[:]
+    mask = indices < num_elements
+    batch_index = indices // 50
+    element_index = indices
 
-    # Calculate indices for accessing input gradients and dropout masks
-    input_grad_index = block_indices // 50
-    dropout_mask_index = block_indices
+    input_grad = tl.load(input_grad_ptr + (batch_index), mask, eviction_policy='evict_last')
+    dropout_mask = tl.load(dropout_mask_ptr + (batch_index), mask, eviction_policy='evict_last')
+    dropout_mask_bool = tl.load(dropout_mask_bool_ptr + (element_index), mask).to(tl.int1)
 
-    # Load input gradients and dropout masks
-    input_grad = tl.load(input_grad_ptr + (input_grad_index), valid_mask, eviction_policy='evict_last')
-    dropout_mask = tl.load(dropout_mask_ptr + (input_grad_index), valid_mask, eviction_policy='evict_last')
-    dropout_mask_bool = tl.load(dropout_mask_bool_ptr + (dropout_mask_index), valid_mask).to(tl.int1)
-
-    # Compute gradients
     neg_input_grad = -input_grad
-    dropout_grad = dropout_mask * input_grad
-    fused_multiply_add = tl.extra.cuda.libdevice.fma(neg_input_grad, dropout_grad, dropout_grad)
-    scale_factor = 0.02
-    scaled_fused_grad = fused_multiply_add * scale_factor
-    dropout_mask_float = dropout_mask_bool.to(tl.float32)
-    dropout_scale = 1.25
-    dropout_scaled_mask = dropout_mask_float * dropout_scale
-    final_grad = scaled_fused_grad * dropout_scaled_mask
+    scaled_input_grad = dropout_mask * input_grad
+    fused_multiply_add = tl.extra.cuda.libdevice.fma(neg_input_grad, scaled_input_grad, scaled_input_grad)
 
-    # Store the result
-    tl.store(output_grad_ptr + (dropout_mask_index), final_grad, valid_mask)
+    dropout_scale = 0.02
+    scaled_fma = fused_multiply_add * dropout_scale
+
+    dropout_mask_float = dropout_mask_bool.to(tl.float32)
+    dropout_rescale = 1.25
+    rescaled_dropout_mask = dropout_mask_float * dropout_rescale
+
+    final_output_grad = scaled_fma * rescaled_dropout_mask
+    tl.store(output_grad_ptr + (element_index), final_output_grad, mask)

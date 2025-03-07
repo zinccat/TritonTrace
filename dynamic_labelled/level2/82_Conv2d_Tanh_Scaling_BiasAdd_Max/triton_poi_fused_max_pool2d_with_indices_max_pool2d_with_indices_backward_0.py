@@ -8,11 +8,11 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_poi_fused_max_pool2d_with_indices_max_pool2d_with_indices_backward_0(
-    input_ptr0, input_ptr1, output_ptr0, kernel_size0, kernel_size1, kernel_size2, num_elements, BLOCK_SIZE : tl.constexpr
+    input_ptr0, input_ptr1, output_ptr0, kernel_size0, kernel_size1, kernel_size2, total_elements, BLOCK_SIZE : tl.constexpr
 ):
     block_offset = tl.program_id(0) * BLOCK_SIZE
     block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
+    valid_mask = block_indices < total_elements
 
     x_coord = block_indices % kernel_size0
     y_coord = (block_indices // kernel_size0) % kernel_size0
@@ -23,54 +23,44 @@ def triton_poi_fused_max_pool2d_with_indices_max_pool2d_with_indices_backward_0(
     offset_y = (0 * (0 >= (y_coord // 2)) + (y_coord // 2) * ((y_coord // 2) > 0))
     offset_y_limit = (-1 + ((-1 + (kernel_size2 // 2)) * ((-1 + (kernel_size2 // 2)) <= (1 + (y_coord // 2))) + (1 + (y_coord // 2)) * ((1 + (y_coord // 2)) < (-1 + (kernel_size2 // 2)))))
 
+    offset_y_valid = offset_y * (offset_y <= offset_y_limit) + (-1 + ((-1 + (kernel_size2 // 2)) * ((-1 + (kernel_size2 // 2)) <= (1 + (y_coord // 2))) + (1 + (y_coord // 2)) * ((1 + (y_coord // 2)) < (-1 + (kernel_size2 // 2))))) * ((-1 + ((-1 + (kernel_size2 // 2)) * ((-1 + (kernel_size2 // 2)) <= (1 + (y_coord // 2))) + (1 + (y_coord // 2)) * ((1 + (y_coord // 2)) < (-1 + (kernel_size2 // 2))))) < offset_y))
+
     offset_x = (0 * (0 >= (x_coord // 2)) + (x_coord // 2) * ((x_coord // 2) > 0))
     offset_x_limit = (-1 + ((-1 + (kernel_size2 // 2)) * ((-1 + (kernel_size2 // 2)) <= (1 + (x_coord // 2))) + (1 + (x_coord // 2)) * ((1 + (x_coord // 2)) < (-1 + (kernel_size2 // 2)))))
 
-    index0 = (
-        z_coord
-        + ((-1) * (offset_y * (offset_y <= offset_y_limit) + (-1 + offset_y_limit) * (offset_y_limit < offset_y)))
-        + z_coord * (kernel_size2 // 2) * (kernel_size2 // 2)
-        + (kernel_size2 // 2) * (offset_y * (offset_y <= offset_y_limit) + (-1 + offset_y_limit) * (offset_y_limit < offset_y))
-        + (-2) * z_coord * (kernel_size2 // 2)
-        + (offset_x * (offset_x <= offset_x_limit) + (-1 + offset_x_limit) * (offset_x_limit < offset_x))
+    offset_x_valid = offset_x * (offset_x <= offset_x_limit) + (-1 + ((-1 + (kernel_size2 // 2)) * ((-1 + (kernel_size2 // 2)) <= (1 + (x_coord // 2))) + (1 + (x_coord // 2)) * ((1 + (x_coord // 2)) < (-1 + (kernel_size2 // 2))))) * ((-1 + ((-1 + (kernel_size2 // 2)) * ((-1 + (kernel_size2 // 2)) <= (1 + (x_coord // 2))) + (1 + (x_coord // 2)) * ((1 + (x_coord // 2)) < (-1 + (kernel_size2 // 2))))) < offset_x))
+
+    input_index0 = (
+        z_coord + (-1 * offset_y) + z_coord * (kernel_size2 // 2) * (kernel_size2 // 2) +
+        (kernel_size2 // 2) * offset_y_valid + (-2 * z_coord * (kernel_size2 // 2)) +
+        offset_x_valid
     )
 
-    index1 = (
-        z_coord
-        + ((-1) * (offset_y * (offset_y <= offset_y_limit) + (-1 + offset_y_limit) * (offset_y_limit < offset_y)))
-        + z_coord * (kernel_size2 // 2) * (kernel_size2 // 2)
-        + (kernel_size2 // 2) * (offset_y * (offset_y <= offset_y_limit) + (-1 + offset_y_limit) * (offset_y_limit < offset_y))
-        + (-2) * z_coord * (kernel_size2 // 2)
-        + (offset_x * (offset_x <= offset_x_limit) + (-1 + offset_x_limit) * (offset_x_limit < offset_x))
+    input_index1 = (
+        z_coord + (-1 * offset_y) + z_coord * (kernel_size2 // 2) * (kernel_size2 // 2) +
+        (kernel_size2 // 2) * offset_y_valid + (-2 * z_coord * (kernel_size2 // 2)) +
+        offset_x_valid
     )
 
-    tmp0 = tl.load(input_ptr0 + index0, valid_mask, eviction_policy='evict_last')
-    tmp12 = tl.load(input_ptr1 + index1, valid_mask, eviction_policy='evict_last')
+    input_value0 = tl.load(input_ptr0 + input_index0, valid_mask, eviction_policy='evict_last')
+    input_value1 = tl.load(input_ptr1 + input_index1, valid_mask, eviction_policy='evict_last')
 
-    tmp1 = tl.full([1], 2, tl.int32)
-    tmp2 = tl.where((tmp0 < 0) != (tmp1 < 0), tl.where(tmp0 % tmp1 != 0, tmp0 // tmp1 - 1, tmp0 // tmp1), tmp0 // tmp1)
-    tmp3 = tmp2 * tmp1
-    tmp4 = tmp0 - tmp3
+    divisor = tl.full([1], 2, tl.int32)
+    quotient = tl.where((input_value0 < 0) != (divisor < 0), tl.where(input_value0 % divisor != 0, input_value0 // divisor - 1, input_value0 // divisor), input_value0 // divisor)
+    product = quotient * divisor
+    remainder = input_value0 - product
 
-    offset_y_double = 2 * (offset_y * (offset_y <= offset_y_limit) + (-1 + offset_y_limit) * (offset_y_limit < offset_y))
-    tmp5 = offset_y_double
-    tmp6 = tmp5 + tmp2
+    y_offset = 2 * offset_y_valid
+    y_offset_adjusted = y_offset + quotient
 
-    offset_x_double = 2 * (offset_x * (offset_x <= offset_x_limit) + (-1 + offset_x_limit) * (offset_x_limit < offset_x))
-    tmp7 = offset_x_double
-    tmp8 = tmp7 + tmp4
+    x_offset = 2 * offset_x_valid
+    x_offset_adjusted = x_offset + remainder
 
-    kernel_size0 = kernel_size0
-    tmp9 = kernel_size0
-    tmp10 = tmp6 * tmp9
-    tmp11 = tmp10 + tmp8
+    linear_offset = y_offset_adjusted * kernel_size0 + x_offset_adjusted
 
-    y_index = y_index
-    tmp13 = y_index
-    tmp14 = tmp11 == tmp13
+    target_index = y_index
+    match = linear_offset == target_index
 
-    zero_value = 0.0
-    tmp15 = zero_value
-    tmp16 = tl.where(tmp14, tmp12, tmp15)
+    output_value = tl.where(match, input_value1, 0.0)
 
-    tl.store(output_ptr0 + linear_index, tmp16, valid_mask)
+    tl.store(output_ptr0 + linear_index, output_value, valid_mask)

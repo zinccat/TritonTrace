@@ -7,34 +7,31 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_native_group_norm_2poi_fused_native_group_norm_2(
-    input_ptr_mean, input_ptr_inv_std, input_ptr_var, input_ptr_gamma, input_ptr_beta,
-    output_ptr, kernel_size_h, kernel_size_w, num_elements, XBLOCK: tl.constexpr
-):
-    x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:]
-    x_mask = x_index < num_elements
-    x_linear_index = x_index
-    x_group_index = x_index // kernel_size_h
-    x_channel_index = (x_index // kernel_size_h) % 64
-    x_within_kernel_index = x_index % kernel_size_w
-    x_channel_group_index = x_index // kernel_size_w
+def triton_poi_fused_native_group_norm_2(in_ptr0, in_ptr1, in_ptr2, in_ptr3, in_ptr4, out_ptr0, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    index = offset + tl.arange(0, XBLOCK)[:]
+    mask = index < num_elements
+    linear_index = index
+    group_index = index // kernel_size0
+    channel_index = (index // kernel_size0) % 64
+    spatial_index = index % kernel_size1
+    batch_index = index // kernel_size1
 
-    mean = tl.load(input_ptr_mean + (x_linear_index), x_mask, eviction_policy='evict_last')
-    inv_std = tl.load(input_ptr_inv_std + (x_group_index // 8), x_mask, eviction_policy='evict_last')
-    var = tl.load(input_ptr_var + (x_group_index // 8), x_mask, eviction_policy='evict_last')
-    gamma = tl.load(input_ptr_gamma + (x_channel_index), x_mask, eviction_policy='evict_last')
-    beta = tl.load(input_ptr_beta + (x_channel_index), x_mask, eviction_policy='evict_last')
+    input_data = tl.load(in_ptr0 + (linear_index), mask, eviction_policy='evict_last')
+    mean_data = tl.load(in_ptr1 + (group_index // 8), mask, eviction_policy='evict_last')
+    variance_data = tl.load(in_ptr2 + (group_index // 8), mask, eviction_policy='evict_last')
+    gamma_data = tl.load(in_ptr3 + (channel_index), mask, eviction_policy='evict_last')
+    beta_data = tl.load(in_ptr4 + (channel_index), mask, eviction_policy='evict_last')
 
-    normalized = mean - inv_std
-    var_scaled = 8 * kernel_size_h
-    var_scaled_float = var_scaled.to(tl.float32)
-    normalized_var = var / var_scaled_float
+    normalized_data = input_data - mean_data
+    variance_scale = 8 * kernel_size0
+    variance_scale_float = variance_scale.to(tl.float32)
+    variance_adjusted = variance_data / variance_scale_float
     epsilon = 1e-05
-    rsqrt_var = normalized_var + epsilon
-    inv_std_dev = tl.extra.cuda.libdevice.rsqrt(rsqrt_var)
-    scaled_normalized = normalized * inv_std_dev
-    scaled_gamma = scaled_normalized * gamma
-    output = scaled_gamma + beta
+    variance_stabilized = variance_adjusted + epsilon
+    inv_stddev = tl.extra.cuda.libdevice.rsqrt(variance_stabilized)
+    scaled_data = normalized_data * inv_stddev
+    gamma_scaled_data = scaled_data * gamma_data
+    output_data = gamma_scaled_data + beta_data
 
-    tl.store(output_ptr + (x_within_kernel_index + x_channel_group_index * (kernel_size_h // kernel_size_w)), output, x_mask)
+    tl.store(out_ptr0 + (spatial_index + batch_index * (kernel_size0 // kernel_size1)), output_data, mask)

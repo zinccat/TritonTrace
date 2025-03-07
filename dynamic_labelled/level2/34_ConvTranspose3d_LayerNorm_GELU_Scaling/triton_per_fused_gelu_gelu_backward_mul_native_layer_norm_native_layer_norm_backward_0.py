@@ -28,45 +28,46 @@ def triton_per_fused_gelu_gelu_backward_mul_native_layer_norm_native_layer_norm_
 
     diff = input0 - input1
     scaled_diff = diff * input3
-    scaled_diff_input5 = scaled_diff * input5
-    sum_scaled_diff_input5_input7 = scaled_diff_input5 + input7
+    scaled_diff_layer_norm = scaled_diff * input5
+    layer_norm_output = scaled_diff_layer_norm + input7
 
-    constant1 = 1.0
-    scaled_input9 = input9 * constant1
-    constant2 = 0.7071067811865476
-    scaled_sum = sum_scaled_diff_input5_input7 * constant2
-    erf_result = tl.extra.cuda.libdevice.erf(scaled_sum)
-    erf_result_plus_one = erf_result + constant1
-    constant3 = 0.5
-    half_erf_result_plus_one = erf_result_plus_one * constant3
+    one = 1.0
+    sqrt_two = 0.7071067811865476
+    erf_input = layer_norm_output * sqrt_two
+    erf_output = tl.extra.cuda.libdevice.erf(erf_input)
+    erf_plus_one = erf_output + one
+    half = 0.5
+    gelu_approx = erf_plus_one * half
 
-    squared_sum = sum_scaled_diff_input5_input7 * sum_scaled_diff_input5_input7
-    constant4 = -0.5
-    exp_argument = squared_sum * constant4
-    exp_result = tl.math.exp(exp_argument)
-    constant5 = 0.3989422804014327
-    scaled_exp_result = exp_result * constant5
-    scaled_sum_exp_result = sum_scaled_diff_input5_input7 * scaled_exp_result
-    gelu_result = half_erf_result_plus_one + scaled_sum_exp_result
+    squared_output = layer_norm_output * layer_norm_output
+    neg_half = -0.5
+    exp_input = squared_output * neg_half
+    exp_output = tl.math.exp(exp_input)
+    sqrt_two_pi = 0.3989422804014327
+    gaussian = exp_output * sqrt_two_pi
+    gaussian_scaled = layer_norm_output * gaussian
+    gelu_exact = gelu_approx + gaussian_scaled
 
-    scaled_gelu_result = scaled_input9 * gelu_result
-    scaled_gelu_result_input5 = scaled_gelu_result * input5
-    broadcast_scaled_gelu_result_input5 = tl.broadcast_to(scaled_gelu_result_input5, [XBLOCK, RBLOCK])
-    sum_broadcast_scaled_gelu_result_input5 = tl.sum(broadcast_scaled_gelu_result_input5, 1)[:, None]
+    gelu_scaled = input9 * one
+    gelu_result = gelu_scaled * gelu_exact
+    gelu_scaled_layer_norm = gelu_result * input5
 
-    scaled_gelu_result_scaled_diff = scaled_gelu_result_input5 * scaled_diff
-    broadcast_scaled_gelu_result_scaled_diff = tl.broadcast_to(scaled_gelu_result_scaled_diff, [XBLOCK, RBLOCK])
-    sum_broadcast_scaled_gelu_result_scaled_diff = tl.sum(broadcast_scaled_gelu_result_scaled_diff, 1)[:, None]
+    broadcast_gelu_scaled_layer_norm = tl.broadcast_to(gelu_scaled_layer_norm, [XBLOCK, RBLOCK])
+    sum_gelu_scaled_layer_norm = tl.sum(broadcast_gelu_scaled_layer_norm, 1)[:, None]
 
-    constant6 = 64.0
-    scaled_gelu_result_constant6 = scaled_gelu_result_input5 * constant6
-    diff_sum_broadcast_scaled_gelu_result_constant6 = scaled_gelu_result_constant6 - sum_broadcast_scaled_gelu_result_input5
-    product_scaled_diff_sum_broadcast_scaled_gelu_result_scaled_diff = scaled_diff * sum_broadcast_scaled_gelu_result_scaled_diff
-    final_diff = diff_sum_broadcast_scaled_gelu_result_constant6 - product_scaled_diff_sum_broadcast_scaled_gelu_result_scaled_diff
+    gelu_scaled_diff = gelu_scaled_layer_norm * scaled_diff
+    broadcast_gelu_scaled_diff = tl.broadcast_to(gelu_scaled_diff, [XBLOCK, RBLOCK])
+    sum_gelu_scaled_diff = tl.sum(broadcast_gelu_scaled_diff, 1)[:, None]
 
-    constant7 = 0.015625
-    scaled_input3_constant7 = input3 * constant7
-    final_result = scaled_input3_constant7 * final_diff
+    sixty_four = 64.0
+    gelu_scaled_sixty_four = gelu_scaled_layer_norm * sixty_four
+    gelu_scaled_sixty_four_minus_sum = gelu_scaled_sixty_four - sum_gelu_scaled_layer_norm
+    gelu_scaled_diff_times_sum = scaled_diff * sum_gelu_scaled_diff
+    final_result = gelu_scaled_sixty_four_minus_sum - gelu_scaled_diff_times_sum
 
-    tl.store(out_ptr0 + (r1 + 64 * x0), sum_scaled_diff_input5_input7, None)
-    tl.store(in_out_ptr0 + (r1 + 64 * x0), final_result, None)
+    scaling_factor = 0.015625
+    input3_scaled = input3 * scaling_factor
+    final_scaled_result = input3_scaled * final_result
+
+    tl.store(out_ptr0 + (r1 + 64 * x0), layer_norm_output, None)
+    tl.store(in_out_ptr0 + (r1 + 64 * x0), final_scaled_result, None)

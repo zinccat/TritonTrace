@@ -41,8 +41,8 @@ def triton_red_fused_add_native_layer_norm_native_layer_norm_backward_2(
         input_broadcast = tl.broadcast_to(input_value, [XBLOCK, RBLOCK])
         sum_input = tl.where(r_mask, sum_input + input_broadcast, sum_input)
 
-    grad_output_sum = tl.sum(sum_grad, 1)[:, None]
+    grad_sum = tl.sum(sum_grad, 1)[:, None]
     input_sum = tl.sum(sum_input, 1)[:, None]
     
-    tl.store(output_grad_ptr + (x3), grad_output_sum, None)
+    tl.store(output_grad_ptr + (x3), grad_sum, None)
     tl.store(output_ptr + (x3), input_sum, None)

@@ -7,27 +7,35 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_logsumexp_mul_threshold_backward_0poi_fused_logsumexp_mul_threshold_backward_0(
-    in_out_ptr0, in_ptr0, in_ptr1, kernel_size0, kernel_size1, kernel_size2, kernel_size3, num_elements, XBLOCK: tl.constexpr
+def triton_poi_fused_logsumexp_mul_threshold_backward_0(
+    in_out_ptr0, in_ptr0, in_ptr1, kernel_size_0, kernel_size_1, kernel_size_2, kernel_size_3, 
+    num_elements, BLOCK_SIZE : tl.constexpr
 ):
-    offset = tl.program_id(0) * XBLOCK
-    index = offset + tl.arange(0, XBLOCK)[:]
-    mask = index < num_elements
-    kernel_index0 = index % kernel_size0
-    kernel_index2 = index // kernel_size1
-    linear_index = index
-    loaded_value0 = tl.load(
-        in_ptr0 + (kernel_index0 + kernel_index2 * (kernel_size3 // 2) * (kernel_size3 // 2) * (kernel_size2 // 2)),
-        mask,
+    block_offset = tl.program_id(0) * BLOCK_SIZE
+    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
+    valid_mask = block_indices < num_elements
+
+    kernel_index_0 = block_indices % kernel_size_0
+    kernel_index_2 = block_indices // kernel_size_1
+    linear_index = block_indices
+
+    input_masked = tl.load(
+        in_ptr0 + (kernel_index_0 + kernel_index_2 * (kernel_size_3 // 2) * (kernel_size_3 // 2) * (kernel_size_2 // 2)), 
+        valid_mask, 
         eviction_policy='evict_last'
     ).to(tl.int1)
-    loaded_value1 = tl.load(
-        in_ptr1 + (kernel_index0 + kernel_index2 * (kernel_size3 // 2) * (kernel_size3 // 2) * (kernel_size2 // 2)),
-        mask,
+
+    input_data_1 = tl.load(
+        in_ptr1 + (kernel_index_0 + kernel_index_2 * (kernel_size_3 // 2) * (kernel_size_3 // 2) * (kernel_size_2 // 2)), 
+        valid_mask, 
         eviction_policy='evict_last'
     )
-    loaded_value4 = tl.load(in_out_ptr0 + (linear_index), mask, eviction_policy='evict_last')
+
+    input_output_data = tl.load(in_out_ptr0 + (linear_index), valid_mask, eviction_policy='evict_last')
+
     zero_value = 0.0
-    conditional_value = tl.where(loaded_value0, zero_value, loaded_value1)
-    result_value = conditional_value * loaded_value4
-    tl.store(in_out_ptr0 + (linear_index), result_value, mask)
+    selected_input = tl.where(input_masked, zero_value, input_data_1)
+
+    result = selected_input * input_output_data
+
+    tl.store(in_out_ptr0 + (linear_index), result, valid_mask)

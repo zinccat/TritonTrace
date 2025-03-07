@@ -7,31 +7,29 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_native_batch_norm_backward_3(
-    input_grad_ptr, input_ptr, output_grad_ptr, output_ptr, 
-    xnumel, rnumel, XBLOCK: tl.constexpr
-):
-    xnumel = 16
-    rnumel = 249
+def triton_per_fused_native_batch_norm_backward_3(input_grad_ptr, input_ptr, output_grad_ptr, output_ptr, num_elements, reduced_num_elements, XBLOCK: tl.constexpr):
+    num_elements = 16
+    reduced_num_elements = 249
     RBLOCK: tl.constexpr = 256
 
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < xnumel
+    x_mask = x_indices < num_elements
 
     r_indices = tl.arange(0, RBLOCK)[None, :]
-    r_mask = r_indices < rnumel
+    r_mask = r_indices < reduced_num_elements
 
-    r_index = r_indices
-    x_index = x_indices
+    reduced_indices = r_indices
+    input_indices = x_indices
 
-    tmp_input_grad = tl.load(input_grad_ptr + (r_index + 249 * x_index), r_mask & x_mask, other=0.0)
-    tmp_input = tl.load(input_ptr + (x_index), x_mask, eviction_policy='evict_last')
+    input_grad = tl.load(input_grad_ptr + (reduced_indices + 249 * input_indices), r_mask & x_mask, other=0.0)
+    input_data = tl.load(input_ptr + (input_indices), x_mask, eviction_policy='evict_last')
 
-    tmp_broadcast = tl.broadcast_to(tmp_input_grad, [XBLOCK, RBLOCK])
-    tmp_masked = tl.where(r_mask & x_mask, tmp_broadcast, 0)
-    tmp_sum = tl.sum(tmp_masked, 1)[:, None]
+    broadcast_input_grad = tl.broadcast_to(input_grad, [XBLOCK, RBLOCK])
+    masked_broadcast = tl.where(r_mask & x_mask, broadcast_input_grad, 0)
+    summed_masked_broadcast = tl.sum(masked_broadcast, 1)[:, None]
 
-    tmp_output = tmp_sum * tmp_input
-    tl.store(output_ptr + (x_index), tmp_output, x_mask)
-    tl.store(output_grad_ptr + (x_index), tmp_sum, x_mask)
+    output_data = summed_masked_broadcast * input_data
+
+    tl.store(output_ptr + (input_indices), output_data, x_mask)
+    tl.store(output_grad_ptr + (input_indices), summed_masked_broadcast, x_mask)

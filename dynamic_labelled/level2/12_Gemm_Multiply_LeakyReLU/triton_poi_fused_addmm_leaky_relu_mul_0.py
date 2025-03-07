@@ -7,25 +7,30 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_addmm_leaky_relu_mul_0poi_fused_addmm_leaky_relu_mul_0(in_out_ptr, input_ptr, output_ptr, num_elements, XBLOCK: tl.constexpr):
-    offset = tl.program_id(0) * XBLOCK
-    indices = offset + tl.arange(0, XBLOCK)[:]
-    mask = indices < num_elements
-    global_indices = indices
-    local_indices = indices % 512
+def triton_poi_fused_addmm_leaky_relu_mul_0(in_out_ptr0, in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x2 = xindex
+    x0 = (xindex % 512)
     
-    in_out_values = tl.load(in_out_ptr + (global_indices), mask)
-    input_values = tl.load(input_ptr + (local_indices), mask, eviction_policy='evict_last')
+    # Load data from input pointers
+    input_data = tl.load(in_out_ptr0 + (x2), xmask)
+    weight_data = tl.load(in_ptr0 + (x0), xmask, eviction_policy='evict_last')
     
-    added_values = in_out_values + input_values
-    scaled_values = added_values * 2.0
+    # Perform element-wise addition
+    added_result = input_data + weight_data
     
+    # Scale the result
+    scale_factor = 2.0
+    scaled_result = added_result * scale_factor
+    
+    # Apply Leaky ReLU
     zero_threshold = 0.0
-    is_positive = scaled_values > zero_threshold
-    leaky_factor = 0.1
-    leaky_values = scaled_values * leaky_factor
+    leaky_relu_slope = 0.1
+    is_positive = scaled_result > zero_threshold
+    leaky_relu_result = tl.where(is_positive, scaled_result, scaled_result * leaky_relu_slope)
     
-    activated_values = tl.where(is_positive, scaled_values, leaky_values)
-    
-    tl.store(output_ptr + (global_indices), is_positive, mask)
-    tl.store(in_out_ptr + (global_indices), activated_values, mask)
+    # Store results
+    tl.store(out_ptr0 + (x2), is_positive, xmask)
+    tl.store(in_out_ptr0 + (x2), leaky_relu_result, xmask)

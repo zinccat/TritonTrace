@@ -7,42 +7,38 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_native_group_norm_backward_0red_fused_native_group_norm_backward_0(
-    input_grad_ptr, input_ptr, output_grad_ptr0, output_grad_ptr1, xnumel, rnumel, 
-    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
-):
+def triton_red_fused_native_group_norm_backward_0(input_grad_ptr, input_ptr, output_grad_ptr0, output_grad_ptr1, xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
     rnumel = 4356
-    xoffset = tl.program_id(0) * XBLOCK
-    xindex = xoffset + tl.arange(0, XBLOCK)[:, None]
-    xmask = xindex < xnumel
-    rbase = tl.arange(0, RBLOCK)[None, :]
-    x_indices = xindex
-    sum_grad_x = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    sum_input_x = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-
-    for roffset in range(0, rnumel, RBLOCK):
-        rindex = roffset + rbase
-        rmask = rindex < rnumel
-        r_indices = rindex
-        grad_input = tl.load(input_grad_ptr + (r_indices + 4356 * x_indices), rmask & xmask, eviction_policy='evict_first', other=0.0)
-        input_data = tl.load(input_ptr + (r_indices + 4356 * x_indices), rmask & xmask, eviction_policy='evict_first', other=0.0)
+    x_offset = tl.program_id(0) * XBLOCK
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
+    x_mask = x_indices < xnumel
+    r_base = tl.arange(0, RBLOCK)[None, :]
+    x_indices_flat = x_indices
+    temp_sum0 = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    temp_sum1 = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    
+    for r_offset in range(0, rnumel, RBLOCK):
+        r_indices = r_offset + r_base
+        r_mask = r_indices < rnumel
+        r_indices_flat = r_indices
+        input_grad = tl.load(input_grad_ptr + (r_indices_flat + 4356 * x_indices_flat), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
+        input = tl.load(input_ptr + (r_indices_flat + 4356 * x_indices_flat), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
         
         half = 0.5
+        scaled_input = input * half
         sqrt_inv_2 = 0.7071067811865476
-        erf_input = input_data * sqrt_inv_2
+        erf_input = input * sqrt_inv_2
         erf_result = tl.extra.cuda.libdevice.erf(erf_input)
         one = 1.0
-        gelu_output = (input_data * half) * (erf_result + one)
-        grad_output = grad_input * gelu_output
+        erf_adjusted = erf_result + one
+        activation_grad = scaled_input * erf_adjusted
+        grad_wrt_input = input_grad * activation_grad
         
-        grad_output_broadcast = tl.broadcast_to(grad_output, [XBLOCK, RBLOCK])
-        sum_grad_x = tl.where(rmask & xmask, sum_grad_x + grad_output_broadcast, sum_grad_x)
-        
-        input_data_broadcast = tl.broadcast_to(input_data, [XBLOCK, RBLOCK])
-        sum_input_x = tl.where(rmask & xmask, sum_input_x + input_data_broadcast, sum_input_x)
-
-    sum_grad_x_reduced = tl.sum(sum_grad_x, 1)[:, None]
-    sum_input_x_reduced = tl.sum(sum_input_x, 1)[:, None]
+        temp_sum0 += tl.where(r_mask & x_mask, tl.broadcast_to(grad_wrt_input, [XBLOCK, RBLOCK]), temp_sum0)
+        temp_sum1 += tl.where(r_mask & x_mask, tl.broadcast_to(input_grad, [XBLOCK, RBLOCK]), temp_sum1)
     
-    tl.store(output_grad_ptr0 + (x_indices), sum_grad_x_reduced, xmask)
-    tl.store(output_grad_ptr1 + (x_indices), sum_input_x_reduced, xmask)
+    output_grad0 = tl.sum(temp_sum0, 1)[:, None]
+    output_grad1 = tl.sum(temp_sum1, 1)[:, None]
+    
+    tl.store(output_grad_ptr0 + (x_indices_flat), output_grad0, x_mask)
+    tl.store(output_grad_ptr1 + (x_indices_flat), output_grad1, x_mask)

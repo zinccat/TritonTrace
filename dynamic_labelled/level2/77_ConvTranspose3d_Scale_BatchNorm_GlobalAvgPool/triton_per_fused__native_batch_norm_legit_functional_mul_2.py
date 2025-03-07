@@ -23,14 +23,14 @@ def triton_per_fused__native_batch_norm_legit_functional_mul_2(
     r1 = r_index
     x0 = x_index
 
-    # Load input data with masking
+    # Load input tensors
     input_mean = tl.load(input_mean_ptr + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
     input_var = tl.load(input_var_ptr + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
     input_x = tl.load(input_x_ptr + (x0 + 32 * r1), r_mask & x_mask, other=0.0)
     input_beta = tl.load(input_beta_ptr + (x0), x_mask, eviction_policy='evict_last')
     input_gamma = tl.load(input_gamma_ptr + (x0), x_mask, eviction_policy='evict_last')
 
-    # Broadcast loaded data
+    # Broadcast loaded values
     broadcast_mean = tl.broadcast_to(input_mean, [XBLOCK, RBLOCK])
     broadcast_var = tl.broadcast_to(input_var, [XBLOCK, RBLOCK])
     broadcast_x = tl.broadcast_to(input_x, [XBLOCK, RBLOCK])
@@ -52,8 +52,8 @@ def triton_per_fused__native_batch_norm_legit_functional_mul_2(
                            kernel_size_0 * kernel_size_0 * kernel_size_1 * kernel_size_1 + \
                            2 * kernel_size_0 * kernel_size_1 * kernel_size_1 + \
                            4 * kernel_size_1 * kernel_size_0 * kernel_size_0 + 8 * kernel_size_0 * kernel_size_1
-    normalization_factor = normalization_factor.to(tl.float32)
-    variance_adjustment = reshaped_var / normalization_factor
+    normalization_factor_float = normalization_factor.to(tl.float32)
+    variance_adjustment = reshaped_var / normalization_factor_float
     epsilon = 1e-05
     adjusted_variance = variance_adjustment + epsilon
     inv_stddev = tl.extra.cuda.libdevice.rsqrt(adjusted_variance)
@@ -63,24 +63,25 @@ def triton_per_fused__native_batch_norm_legit_functional_mul_2(
                       32 * kernel_size_0 * kernel_size_0 * kernel_size_1 * kernel_size_1 + \
                       64 * kernel_size_0 * kernel_size_1 * kernel_size_1 + \
                       128 * kernel_size_1 * kernel_size_0 * kernel_size_0 + 256 * kernel_size_0 * kernel_size_1) / 32) / \
-                     ((tl.full([], -1.0, tl.float64)) + \
+                     ((tl.full([], -1.00000000000000, tl.float64)) + \
                       ((128 * kernel_size_0 * kernel_size_0 + 256 * kernel_size_0 + \
                         32 * kernel_size_0 * kernel_size_0 * kernel_size_1 * kernel_size_1 + \
                         64 * kernel_size_0 * kernel_size_1 * kernel_size_1 + \
                         128 * kernel_size_1 * kernel_size_0 * kernel_size_0 + 256 * kernel_size_0 * kernel_size_1) / 32)))
-    scale_factor = scale_factor.to(tl.float32)
-    variance_scaled = variance_adjustment * scale_factor
+    scale_factor_float = scale_factor.to(tl.float32)
+    scaled_variance = variance_adjustment * scale_factor_float
 
     # Compute running mean and variance
     momentum = 0.1
-    running_mean = reshaped_mean * momentum
-    running_var = variance_scaled * momentum
-    updated_mean = input_beta * 0.9 + running_mean
-    updated_var = input_gamma * 0.9 + running_var
+    running_mean = scaled_variance * momentum
+    running_mean_factor = reshaped_mean * momentum
+    running_var_factor = input_beta * 0.9
+    updated_running_mean = running_mean + running_mean_factor
+    updated_running_var = running_var_factor + running_var_factor
 
     # Store results
     tl.store(output_x_ptr + (x0), inv_stddev, x_mask)
-    tl.store(output_beta_ptr + (x0), updated_mean, x_mask)
-    tl.store(output_gamma_ptr + (x0), updated_var, x_mask)
+    tl.store(output_beta_ptr + (x0), updated_running_mean, x_mask)
+    tl.store(output_gamma_ptr + (x0), updated_running_var, x_mask)
     tl.store(output_mean_ptr + (x0), reshaped_mean, x_mask)
     tl.store(output_var_ptr + (x0), reshaped_var, x_mask)

@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_backward_3(in_ptr, out_ptr, kernel_size_0, kernel_size_1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+def triton_red_fused_convolution_backward_3(input_ptr, output_ptr, kernel_size_0, kernel_size_1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
     input_num_elements = 240
     input_offset = tl.program_id(0) * XBLOCK
     input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
@@ -28,18 +28,18 @@ def triton_red_fused_convolution_backward_3(in_ptr, out_ptr, kernel_size_0, kern
         temp_mask = temp_index_0 < temp_index_1
 
         temp_load = tl.load(
-            in_ptr + (
+            input_ptr + (
                 (-2) * (
-                    (((temp_index_0 // (-2 + kernel_size_1)) % (-2 + kernel_size_1))
+                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15))) // ((-2) + kernel_size_1)) % ((-2) + kernel_size_1))
                 ) + 4 * input_index_0 + 64 * (
-                    ((temp_index_0 // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)) % kernel_size_0)
+                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15))) // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)) % kernel_size_0)
                 ) + kernel_size_1 * (
-                    ((temp_index_0 // (-2 + kernel_size_1)) % (-2 + kernel_size_1))
+                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15))) // ((-2) + kernel_size_1)) % ((-2) + kernel_size_1))
                 ) + input_index_0 * kernel_size_1 * kernel_size_1 + (-64) * kernel_size_1 * (
-                    ((temp_index_0 // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)) % kernel_size_0)
+                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15))) // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)) % kernel_size_0)
                 ) + (-4) * kernel_size_1 * input_index_0 + 16 * kernel_size_1 * kernel_size_1 * (
-                    ((temp_index_0 // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)) % kernel_size_0)
-                ) + (temp_index_0 % (-2 + kernel_size_1))
+                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15))) // (4 + kernel_size_1 * kernel_size_1 + (-4) * kernel_size_1)) % kernel_size_0)
+                ) + (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size_0 + kernel_size_0 * kernel_size_1 * kernel_size_1 + (-4) * kernel_size_0 * kernel_size_1, 15))) % ((-2) + kernel_size_1))
             ),
             reduction_mask & temp_mask & input_mask,
             eviction_policy='evict_last',
@@ -47,8 +47,8 @@ def triton_red_fused_convolution_backward_3(in_ptr, out_ptr, kernel_size_0, kern
         )
 
         temp_broadcast = tl.broadcast_to(temp_load, [XBLOCK, RBLOCK])
-        temp_accumulated = temp_accumulator + temp_broadcast
-        temp_accumulator = tl.where(reduction_mask & input_mask, temp_accumulated, temp_accumulator)
+        temp_accumulator_update = temp_accumulator + temp_broadcast
+        temp_accumulator = tl.where(reduction_mask & input_mask, temp_accumulator_update, temp_accumulator)
 
     temp_result = tl.sum(temp_accumulator, 1)[:, None]
-    tl.store(out_ptr + (input_index_3), temp_result, input_mask)
+    tl.store(output_ptr + (input_index_3), temp_result, input_mask)

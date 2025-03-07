@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_convolution_backward_4red_fused_convolution_backward_4(
+def triton_red_fused_convolution_backward_4(
     input_ptr, output_ptr, kernel_size_0, kernel_size_1, kernel_size_2, kernel_size_3, 
     input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
@@ -18,7 +18,7 @@ def triton_red_fused_convolution_backward_4red_fused_convolution_backward_4(
     reduction_base = tl.arange(0, RBLOCK)[None, :]
     input_1 = input_index // 16
     input_0 = (input_index % 16)
-    temp_accumulator = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    temp_buffer = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
     input_3 = input_index
 
     for reduction_offset in range(0, reduction_num_elements, RBLOCK):
@@ -61,16 +61,10 @@ def triton_red_fused_convolution_backward_4red_fused_convolution_backward_4(
             (((temp_index_0 % ((-2) + kernel_size_2))))
         )
 
-        temp_data = tl.load(
-            input_ptr + load_index, 
-            mask=reduction_mask & index_mask & input_mask, 
-            eviction_policy='evict_last', 
-            other=0.0
-        )
+        temp_data = tl.load(input_ptr + load_index, reduction_mask & index_mask & input_mask, eviction_policy='evict_last', other=0.0)
+        broadcasted_data = tl.broadcast_to(temp_data, [XBLOCK, RBLOCK])
+        temp_buffer += broadcasted_data
+        temp_buffer = tl.where(reduction_mask & input_mask, temp_buffer, temp_buffer)
 
-        temp_broadcast = tl.broadcast_to(temp_data, [XBLOCK, RBLOCK])
-        temp_accumulator += temp_broadcast
-        temp_accumulator = tl.where(reduction_mask & input_mask, temp_accumulator, temp_accumulator)
-
-    result_sum = tl.sum(temp_accumulator, 1)[:, None]
-    tl.store(output_ptr + (input_3), result_sum, input_mask)
+    result = tl.sum(temp_buffer, 1)[:, None]
+    tl.store(output_ptr + (input_3), result, input_mask)

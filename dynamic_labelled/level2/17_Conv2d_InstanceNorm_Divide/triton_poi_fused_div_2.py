@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_div_2poi_fused_div_2(input_ptr0, input_ptr1, input_ptr2, output_ptr0, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr):
+def triton_poi_fused_div_2(input_ptr0, input_ptr1, input_ptr2, output_ptr0, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr):
     x_offset = tl.program_id(0) * XBLOCK
     x_index = x_offset + tl.arange(0, XBLOCK)[:]
     x_mask = x_index < num_elements
@@ -17,13 +17,13 @@ def triton_poi_fused_div_2poi_fused_div_2(input_ptr0, input_ptr1, input_ptr2, ou
     input_value1 = tl.load(input_ptr1 + (x1), x_mask, eviction_policy='evict_last')
     input_value2 = tl.load(input_ptr2 + (x1), x_mask, eviction_policy='evict_last')
     subtracted_value = input_value0 - input_value1
-    divisor_constant = 4 + kernel_size1 * kernel_size1 + ((-4) * kernel_size1)
-    divisor_float = divisor_constant.to(tl.float32)
-    normalized_value = input_value2 / divisor_float
+    constant_term = 4 + kernel_size1 * kernel_size1 + ((-4) * kernel_size1)
+    constant_term_float = constant_term.to(tl.float32)
+    division_result = input_value2 / constant_term_float
     epsilon = 1e-05
-    stabilized_value = normalized_value + epsilon
-    reciprocal_sqrt = tl.extra.cuda.libdevice.rsqrt(stabilized_value)
-    scaled_value = subtracted_value * reciprocal_sqrt
+    adjusted_division = division_result + epsilon
+    reciprocal_sqrt = tl.extra.cuda.libdevice.rsqrt(adjusted_division)
+    multiplied_value = subtracted_value * reciprocal_sqrt
     scale_factor = 0.5
-    final_value = scaled_value * scale_factor
-    tl.store(output_ptr0 + (x2), final_value, x_mask)
+    scaled_result = multiplied_value * scale_factor
+    tl.store(output_ptr0 + (x2), scaled_result, x_mask)

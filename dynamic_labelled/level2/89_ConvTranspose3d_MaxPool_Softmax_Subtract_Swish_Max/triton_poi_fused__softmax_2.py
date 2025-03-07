@@ -7,22 +7,17 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused__softmax_2poi_fused__softmax_2(
-    in_out_ptr0, in_ptr0, in_ptr1, kernel_size_0, kernel_size_1, kernel_size_2, kernel_size_3, num_elements, XBLOCK: tl.constexpr
-):
+def triton_poi_fused__softmax_2(output_ptr, input_ptr1, input_ptr2, kernel_size0, kernel_size1, kernel_size2, kernel_size3, num_elements, XBLOCK: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     indices = offset + tl.arange(0, XBLOCK)[:]
     mask = indices < num_elements
     linear_index = indices
-    index_0 = indices % kernel_size_0
-    index_2 = indices // kernel_size_1
-
-    loaded_value = tl.load(in_out_ptr0 + (linear_index), mask, eviction_policy='evict_last')
-    max_value = tl.load(in_ptr0 + (index_0 + kernel_size_2 * index_2 * kernel_size_3 * kernel_size_3), mask, eviction_policy='evict_last')
-    sum_exp_values = tl.load(in_ptr1 + (index_0 + kernel_size_2 * index_2 * kernel_size_3 * kernel_size_3), mask, eviction_policy='evict_last')
-
-    shifted_value = loaded_value - max_value
-    exp_value = tl.math.exp(shifted_value)
-    softmax_result = exp_value / sum_exp_values
-
-    tl.store(in_out_ptr0 + (linear_index), softmax_result, mask)
+    index0 = (indices % kernel_size0)
+    index2 = indices // kernel_size1
+    loaded_output = tl.load(output_ptr + (linear_index), mask, eviction_policy='evict_last')
+    loaded_input1 = tl.load(input_ptr1 + (index0 + kernel_size2 * index2 * kernel_size3 * kernel_size3), mask, eviction_policy='evict_last')
+    loaded_input2 = tl.load(input_ptr2 + (index0 + kernel_size2 * index2 * kernel_size3 * kernel_size3), mask, eviction_policy='evict_last')
+    subtracted = loaded_output - loaded_input1
+    exponentiated = tl.math.exp(subtracted)
+    normalized = exponentiated / loaded_input2
+    tl.store(output_ptr + (linear_index), normalized, mask)

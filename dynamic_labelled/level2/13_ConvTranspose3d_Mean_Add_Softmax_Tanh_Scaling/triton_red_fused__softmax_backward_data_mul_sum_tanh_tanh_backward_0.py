@@ -8,99 +8,72 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_red_fused__softmax_backward_data_mul_sum_tanh_tanh_backward_0(
-    input_grad_ptr, input_ptr, output_ptr, kernel_size_0, kernel_size_1, x_num_elements, r_num_elements, 
+    input_ptr0, input_ptr1, output_ptr0, kernel_size0, kernel_size1, xnumel, rnumel, 
     XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
 ):
-    x_num_elements = 241
+    xnumel = 241
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_indices < x_num_elements
-    r_base_indices = tl.arange(0, RBLOCK)[None, :]
-    x0_indices = x_indices
-    _accumulated_sum = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    x_mask = x_indices < xnumel
+    r_base = tl.arange(0, RBLOCK)[None, :]
+    x0 = x_indices
+    temp_sum = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
 
-    for r_offset in range(0, r_num_elements, RBLOCK):
-        r_indices = r_offset + r_base_indices
-        r_mask = r_indices < r_num_elements
-        r1_indices = r_indices
-        index_offset = r1_indices + x0_indices * (
-            triton_helpers.div_floor_integer(
-                240 + ((-1) * kernel_size_0) + 2 * kernel_size_0 * kernel_size_0 + 
-                ((-8) * kernel_size_1 * kernel_size_0 * kernel_size_0) + 
-                ((-4) * kernel_size_0 * kernel_size_1 * kernel_size_1) + 
-                4 * kernel_size_0 * kernel_size_1 + 
-                8 * kernel_size_0 * kernel_size_0 * kernel_size_1 * kernel_size_1, 
-                241
-            )
-        )
-        max_index = ((-1) * kernel_size_0) + 2 * kernel_size_0 * kernel_size_0 + 
-                    ((-8) * kernel_size_1 * kernel_size_0 * kernel_size_0) + 
-                    ((-4) * kernel_size_0 * kernel_size_1 * kernel_size_1) + 
-                    4 * kernel_size_0 * kernel_size_1 + 
-                    8 * kernel_size_0 * kernel_size_0 * kernel_size_1 * kernel_size_1
-        index_mask = index_offset < max_index
+    for r_offset in range(0, rnumel, RBLOCK):
+        r_indices = r_offset + r_base
+        r_mask = r_indices < rnumel
+        r1 = r_indices
 
-        input_grad_value = tl.load(
-            input_grad_ptr + (
-                (((-1) * (((index_offset // ((-1) + 2 * kernel_size_1)) % ((-1) + 2 * kernel_size_1)))) + 
-                 ((-1) * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0))) + 
-                 ((-4) * kernel_size_1 * (((index_offset // (1 + ((-4) * kernel_size_1) + 4 * kernel_size_1 * kernel_size_1)) % ((-1) + 2 * kernel_size_0)))) + 
-                 ((-4) * kernel_size_1 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0))) + 
-                 2 * kernel_size_0 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0)) + 
-                 2 * kernel_size_1 * (((index_offset // ((-1) + 2 * kernel_size_1)) % ((-1) + 2 * kernel_size_1))) + 
-                 4 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0)) + 
-                 4 * kernel_size_1 * kernel_size_1 * (((index_offset // (1 + ((-4) * kernel_size_1) + 4 * kernel_size_1 * kernel_size_1)) % ((-1) + 2 * kernel_size_0))) + 
-                 ((-8) * kernel_size_0 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0))) + 
-                 8 * kernel_size_0 * kernel_size_1 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0)) + 
-                 ((index_offset % ((-1) + 2 * kernel_size_1))) + 
-                 (((index_offset // (1 + ((-4) * kernel_size_1) + 4 * kernel_size_1 * kernel_size_1)) % ((-1) + 2 * kernel_size_0))))
-            ),
-            rmask & index_mask & x_mask,
-            eviction_policy='evict_last',
-            other=0.0
+        divisor = triton_helpers.div_floor_integer(
+            240 + ((-1) * kernel_size0) + 2 * kernel_size0 * kernel_size0 + 
+            ((-8) * kernel_size1 * kernel_size0 * kernel_size0) + 
+            ((-4) * kernel_size0 * kernel_size1 * kernel_size1) + 
+            4 * kernel_size0 * kernel_size1 + 
+            8 * kernel_size0 * kernel_size0 * kernel_size1 * kernel_size1, 
+            241
         )
 
-        neg_input_grad_value = -input_grad_value
+        tmp0 = r1 + x0 * divisor
+        tmp1 = ((-1) * kernel_size0) + 2 * kernel_size0 * kernel_size0 + \
+               ((-8) * kernel_size1 * kernel_size0 * kernel_size0) + \
+               ((-4) * kernel_size0 * kernel_size1 * kernel_size1) + \
+               4 * kernel_size0 * kernel_size1 + \
+               8 * kernel_size0 * kernel_size0 * kernel_size1 * kernel_size1
 
-        input_value = tl.load(
-            input_ptr + (
-                (((-1) * (((index_offset // ((-1) + 2 * kernel_size_1)) % ((-1) + 2 * kernel_size_1)))) + 
-                 ((-1) * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0))) + 
-                 ((-4) * kernel_size_1 * (((index_offset // (1 + ((-4) * kernel_size_1) + 4 * kernel_size_1 * kernel_size_1)) % ((-1) + 2 * kernel_size_0)))) + 
-                 ((-4) * kernel_size_1 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0))) + 
-                 2 * kernel_size_0 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0)) + 
-                 2 * kernel_size_1 * (((index_offset // ((-1) + 2 * kernel_size_1)) % ((-1) + 2 * kernel_size_1))) + 
-                 4 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0)) + 
-                 4 * kernel_size_1 * kernel_size_1 * (((index_offset // (1 + ((-4) * kernel_size_1) + 4 * kernel_size_1 * kernel_size_1)) % ((-1) + 2 * kernel_size_0))) + 
-                 ((-8) * kernel_size_0 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0))) + 
-                 8 * kernel_size_0 * kernel_size_1 * kernel_size_1 * (((index_offset // ((-1) + ((-4) * kernel_size_1 * kernel_size_1) + 2 * kernel_size_0 + 4 * kernel_size_1 + ((-8) * kernel_size_0 * kernel_size_1) + 8 * kernel_size_0 * kernel_size_1 * kernel_size_1)) % kernel_size_0)) + 
-                 ((index_offset % ((-1) + 2 * kernel_size_1))) + 
-                 (((index_offset // (1 + ((-4) * kernel_size_1) + 4 * kernel_size_1 * kernel_size_1)) % ((-1) + 2 * kernel_size_0))))
-            ),
-            rmask & index_mask & x_mask,
-            eviction_policy='evict_last',
-            other=0.0
-        )
+        tmp2 = tmp0 < tmp1
 
-        scale_factor = 2.0
-        scaled_input_value = input_value * scale_factor
+        index0 = (((-1) * (((r1 + x0 * divisor) // ((-1) + 2 * kernel_size1)) % ((-1) + 2 * kernel_size1)))) + \
+                 ((-1) * (((r1 + x0 * divisor) // ((-1) + ((-4) * kernel_size1 * kernel_size1) + 2 * kernel_size0 + 4 * kernel_size1 + ((-8) * kernel_size0 * kernel_size1) + 8 * kernel_size0 * kernel_size1 * kernel_size1)) % kernel_size0))) + \
+                 ((-4) * kernel_size1 * ((((r1 + x0 * divisor) // (1 + ((-4) * kernel_size1) + 4 * kernel_size1 * kernel_size1)) % ((-1) + 2 * kernel_size0)) % ((-1) + 2 * kernel_size0))) + \
+                 ((-4) * kernel_size1 * kernel_size1 * ((((r1 + x0 * divisor) // ((-1) + ((-4) * kernel_size1 * kernel_size1) + 2 * kernel_size0 + 4 * kernel_size1 + ((-8) * kernel_size0 * kernel_size1) + 8 * kernel_size0 * kernel_size1 * kernel_size1)) % kernel_size0)) % kernel_size0)) + \
+                 2 * kernel_size0 * ((((r1 + x0 * divisor) // ((-1) + ((-4) * kernel_size1 * kernel_size1) + 2 * kernel_size0 + 4 * kernel_size1 + ((-8) * kernel_size0 * kernel_size1) + 8 * kernel_size0 * kernel_size1 * kernel_size1)) % kernel_size0)) + \
+                 2 * kernel_size1 * ((((r1 + x0 * divisor) // ((-1) + 2 * kernel_size1)) % ((-1) + 2 * kernel_size1)) % ((-1) + 2 * kernel_size1)) + \
+                 4 * kernel_size1 * ((((r1 + x0 * divisor) // ((-1) + ((-4) * kernel_size1 * kernel_size1) + 2 * kernel_size0 + 4 * kernel_size1 + ((-8) * kernel_size0 * kernel_size1) + 8 * kernel_size0 * kernel_size1 * kernel_size1)) % kernel_size0)) + \
+                 4 * kernel_size1 * kernel_size1 * ((((r1 + x0 * divisor) // (1 + ((-4) * kernel_size1) + 4 * kernel_size1 * kernel_size1)) % ((-1) + 2 * kernel_size0)) % ((-1) + 2 * kernel_size0)) + \
+                 ((-8) * kernel_size0 * kernel_size1 * ((((r1 + x0 * divisor) // ((-1) + ((-4) * kernel_size1 * kernel_size1) + 2 * kernel_size0 + 4 * kernel_size1 + ((-8) * kernel_size0 * kernel_size1) + 8 * kernel_size0 * kernel_size1 * kernel_size1)) % kernel_size0)) % kernel_size0)) + \
+                 8 * kernel_size0 * kernel_size1 * kernel_size1 * ((((r1 + x0 * divisor) // ((-1) + ((-4) * kernel_size1 * kernel_size1) + 2 * kernel_size0 + 4 * kernel_size1 + ((-8) * kernel_size0 * kernel_size1) + 8 * kernel_size0 * kernel_size1 * kernel_size1)) % kernel_size0)) % kernel_size0) + \
+                 (((r1 + x0 * divisor) % ((-1) + 2 * kernel_size1))) + \
+                 ((((r1 + x0 * divisor) // (1 + ((-4) * kernel_size1) + 4 * kernel_size1 * kernel_size1)) % ((-1) + 2 * kernel_size0))))
 
-        tanh_input_grad_value = tl.extra.cuda.libdevice.tanh(input_grad_value)
-        tanh_squared = tanh_input_grad_value * tanh_input_grad_value
-        one_minus_tanh_squared = 1.0 - tanh_squared
+        tmp3 = tl.load(input_ptr0 + index0, rmask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
+        tmp4 = -tmp3
 
-        scaled_tanh_term = scaled_input_value * one_minus_tanh_squared
-        tanh_term = scaled_tanh_term * input_grad_value
+        tmp5 = tl.load(input_ptr1 + index0, rmask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
+        tmp6 = 2.0
+        tmp7 = tmp5 * tmp6
+        tmp8 = tl.extra.cuda.libdevice.tanh(tmp3)
+        tmp9 = tmp8 * tmp8
+        tmp10 = 1.0
+        tmp11 = tmp10 - tmp9
+        tmp12 = tmp7 * tmp11
+        tmp13 = tmp12 * tmp3
+        tmp14 = tl.extra.cuda.libdevice.fma(tmp4, tmp13, tmp13)
+        tmp15 = tl.full(tmp14.shape, 0, tmp14.dtype)
+        tmp16 = tl.where(tmp2, tmp14, tmp15)
+        tmp17 = tl.broadcast_to(tmp16, [XBLOCK, RBLOCK])
+        temp_sum = temp_sum + tmp17
 
-        fused_tanh_term = tl.extra.cuda.libdevice.fma(neg_input_grad_value, tanh_term, tanh_term)
+        temp_sum = tl.where(rmask & x_mask, temp_sum, temp_sum)
 
-        zero_filled_fused_tanh = tl.full(fused_tanh_term.shape, 0, fused_tanh_term.dtype)
-        selected_fused_tanh = tl.where(index_mask, fused_tanh_term, zero_filled_fused_tanh)
-
-        broadcasted_fused_tanh = tl.broadcast_to(selected_fused_tanh, [XBLOCK, RBLOCK])
-        accumulated_sum = _accumulated_sum + broadcasted_fused_tanh
-
-        _accumulated_sum = tl.where(rmask & x_mask, accumulated_sum, _accumulated_sum)
-
-    summed_accumulated = tl.sum(_accumulated_sum, 1)[:, None]
-    tl.store(output_ptr + (x0_indices), summed_accumulated, x_mask)
+    temp_result = tl.sum(temp_sum, 1)[:, None]
+    tl.store(output_ptr0 + (x0), temp_result, x_mask)

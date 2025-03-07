@@ -42,8 +42,8 @@ def triton_red_fused_native_group_norm_backward_2(
         sum_input += input_broadcast
         sum_input = tl.where(rmask & xmask, sum_input, sum_input)
     
-    sum_grad_output_per_channel = tl.sum(sum_grad_output, 1)[:, None]
-    sum_input_per_channel = tl.sum(sum_input, 1)[:, None]
+    output_grad = tl.sum(sum_grad_output, 1)[:, None]
+    output = tl.sum(sum_input, 1)[:, None]
     
-    tl.store(output_grad_ptr + (x3), sum_grad_output_per_channel, xmask)
-    tl.store(output_ptr + (x3), sum_input_per_channel, xmask)
+    tl.store(output_grad_ptr + (x3), output_grad, xmask)
+    tl.store(output_ptr + (x3), output, xmask)

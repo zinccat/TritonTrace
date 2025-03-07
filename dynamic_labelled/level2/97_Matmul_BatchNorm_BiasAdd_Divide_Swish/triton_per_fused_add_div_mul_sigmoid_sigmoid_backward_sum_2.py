@@ -7,23 +7,15 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_add_div_mul_sigmoid_sigmoid_backward_sum_2(
-    input_ptr, output_ptr, num_elements_x, num_elements_r, XBLOCK: tl.constexpr
-):
+def triton_per_fused_add_div_mul_sigmoid_sigmoid_backward_sum_2(in_ptr0, out_ptr0, xnumel, rnumel, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 8
     x_offset = tl.program_id(0) * XBLOCK
     x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
+    mask = tl.full([XBLOCK, RBLOCK], True, tl.int1)
     r_indices = tl.arange(0, RBLOCK)[None, :]
-    
-    # Load data from input pointer
-    r0 = r_indices
-    loaded_data = tl.load(input_ptr + (r0), None)
-    
-    # Broadcast loaded data to match dimensions
-    broadcasted_data = tl.broadcast_to(loaded_data, [XBLOCK, RBLOCK])
-    
-    # Sum across the second dimension
-    summed_data = tl.sum(broadcasted_data, 1)[:, None]
-    
-    # Store the result in the output pointer
-    tl.store(output_ptr + (tl.full([XBLOCK, 1], 0, tl.int32)), summed_data, None)
+    mask = tl.full([XBLOCK, RBLOCK], True, tl.int1)
+    row_indices = r_indices
+    input_values = tl.load(in_ptr0 + (row_indices), None)
+    broadcasted_values = tl.broadcast_to(input_values, [XBLOCK, RBLOCK])
+    summed_values = tl.sum(broadcasted_values, 1)[:, None]
+    tl.store(out_ptr0 + (tl.full([XBLOCK, 1], 0, tl.int32)), summed_values, None)

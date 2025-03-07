@@ -7,25 +7,26 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_div_mean_pow_sqrt_1poi_fused_add_div_mean_pow_sqrt_1(input_ptr0, input_ptr1, output_ptr0, kernel_size0, kernel_size1, kernel_size2, num_elements, BLOCK_SIZE : tl.constexpr):
-    block_offset = tl.program_id(0) * BLOCK_SIZE
-    block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
-    linear_index = block_indices
-    index_mod_k0 = block_indices % kernel_size0
-    index_div_k1 = block_indices // kernel_size1
+def triton_poi_fused_add_div_mean_pow_sqrt_1(in_ptr0, in_ptr1, out_ptr0, ks0, ks1, ks2, xnumel, XBLOCK: tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    linear_index = xindex
+    x_mod_ks0 = xindex % ks0
+    x_div_ks1 = xindex // ks1
     
-    input_value0 = tl.load(input_ptr0 + (linear_index), valid_mask, eviction_policy='evict_last')
-    input_value1 = tl.load(input_ptr1 + (index_mod_k0 + kernel_size0 * index_div_k1), valid_mask, eviction_policy='evict_last')
+    input_data0 = tl.load(in_ptr0 + (linear_index), xmask, eviction_policy='evict_last')
+    input_data1 = tl.load(in_ptr1 + (x_mod_ks0 + ks0 * x_div_ks1), xmask, eviction_policy='evict_last')
     
-    divisor = kernel_size2
+    divisor = ks2
     divisor_float = divisor.to(tl.float32)
     
-    normalized_value = input_value1 / divisor_float
+    normalized_data = input_data1 / divisor_float
     epsilon = 1e-05
-    adjusted_value = normalized_value + epsilon
+    adjusted_data = normalized_data + epsilon
     
-    sqrt_value = tl.extra.cuda.libdevice.sqrt(adjusted_value)
-    result_value = input_value0 / sqrt_value
+    sqrt_data = tl.extra.cuda.libdevice.sqrt(adjusted_data)
     
-    tl.store(output_ptr0 + (linear_index), result_value, valid_mask)
+    result_data = input_data0 / sqrt_data
+    
+    tl.store(out_ptr0 + (linear_index), result_data, xmask)

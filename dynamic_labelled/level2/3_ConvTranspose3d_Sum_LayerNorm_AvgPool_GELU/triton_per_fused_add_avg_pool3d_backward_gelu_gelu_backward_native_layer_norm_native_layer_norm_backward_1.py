@@ -10,7 +10,7 @@ triton_helpers.set_driver_to_gpu()
 def triton_per_fused_add_avg_pool3d_backward_gelu_gelu_backward_native_layer_norm_native_layer_norm_backward_1(
     input_ptr0, input_ptr1, input_ptr2, input_ptr3, input_ptr4, input_ptr5, 
     output_ptr0, output_ptr3, kernel_size0, kernel_size1, kernel_size2, 
-    xnumel, rnumel, XBLOCK: tl.constexpr
+    x_num_elements, r_num_elements, XBLOCK: tl.constexpr
 ):
     RBLOCK: tl.constexpr = 64
     x_offset = tl.program_id(0) * XBLOCK

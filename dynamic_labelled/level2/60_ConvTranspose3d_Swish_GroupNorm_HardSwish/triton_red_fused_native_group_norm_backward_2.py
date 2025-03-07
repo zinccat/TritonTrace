@@ -20,30 +20,30 @@ def triton_red_fused_native_group_norm_backward_2(
     x1 = x_index // 4
     temp_sum_grad = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
     temp_sum_input = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
-    
+
     for r_offset in range(0, rnumel, RBLOCK):
         r_index = r_offset + r_base
         r_mask = r_index < rnumel
         r2 = r_index
         grad_input = tl.load(input_grad_ptr + (x3 + 16 * r2), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
-        input_value = tl.load(input_ptr + (x3 + 16 * r2), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
-        mean_value = tl.load(mean_ptr + (x1 + 4 * r2), r_mask & x_mask, eviction_policy='evict_last', other=0.0)
-        inv_std_value = tl.load(inv_std_ptr + (x1 + 4 * r2), r_mask & x_mask, eviction_policy='evict_last', other=0.0)
-        
-        mean_scaled_input = input_value * mean_value
-        centered_input = input_value - mean_scaled_input
-        scaled_centered_input = centered_input * inv_std_value
-        broadcast_scaled_centered_input = tl.broadcast_to(scaled_centered_input, [XBLOCK, RBLOCK])
-        
-        temp_sum_grad += broadcast_scaled_centered_input
+        input_data = tl.load(input_ptr + (x3 + 16 * r2), r_mask & x_mask, eviction_policy='evict_first', other=0.0)
+        mean = tl.load(mean_ptr + (x1 + 4 * r2), r_mask & x_mask, eviction_policy='evict_last', other=0.0)
+        inv_std = tl.load(inv_std_ptr + (x1 + 4 * r2), r_mask & x_mask, eviction_policy='evict_last', other=0.0)
+
+        input_mean = input_data * mean
+        grad_input_centered = grad_input - input_mean
+        grad_input_scaled = grad_input_centered * inv_std
+        grad_input_scaled_broadcast = tl.broadcast_to(grad_input_scaled, [XBLOCK, RBLOCK])
+
+        temp_sum_grad += grad_input_scaled_broadcast
         temp_sum_grad = tl.where(r_mask & x_mask, temp_sum_grad, temp_sum_grad)
-        
-        broadcast_input_value = tl.broadcast_to(input_value, [XBLOCK, RBLOCK])
-        temp_sum_input += broadcast_input_value
+
+        input_data_broadcast = tl.broadcast_to(input_data, [XBLOCK, RBLOCK])
+        temp_sum_input += input_data_broadcast
         temp_sum_input = tl.where(r_mask & x_mask, temp_sum_input, temp_sum_input)
-    
+
     sum_grad = tl.sum(temp_sum_grad, 1)[:, None]
     sum_input = tl.sum(temp_sum_input, 1)[:, None]
-    
+
     tl.store(output_grad_ptr + (x3), sum_grad, x_mask)
     tl.store(output_ptr + (x3), sum_input, x_mask)

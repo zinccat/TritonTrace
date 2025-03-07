@@ -7,8 +7,8 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_native_group_norm_backward_2poi_fused_native_group_norm_backward_2(
-    in_out_ptr, input_grad_ptr, input_data_ptr, mean_ptr, variance_ptr, output_grad_ptr, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr
+def triton_poi_fused_native_group_norm_backward_2(
+    in_out_ptr0, in_ptr0, in_ptr1, in_ptr2, in_ptr3, out_ptr0, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr
 ):
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
@@ -16,46 +16,48 @@ def triton_poi_fused_native_group_norm_backward_2poi_fused_native_group_norm_bac
     element_index = index
     element_offset = index % 8
 
-    input_grad_0 = tl.load(input_grad_ptr + (2 * element_index), mask, eviction_policy='evict_last')
-    input_data_0 = tl.load(input_data_ptr + (2 * element_offset), mask, eviction_policy='evict_last')
-    input_grad_1 = tl.load(input_grad_ptr + (1 + 2 * element_index), mask, eviction_policy='evict_last')
-    input_data_1 = tl.load(input_data_ptr + (1 + 2 * element_offset), mask, eviction_policy='evict_last')
-    in_out_value = tl.load(in_out_ptr + (element_index), mask)
-    mean_value = tl.load(mean_ptr + (element_index), mask)
-    variance_0 = tl.load(variance_ptr + (2 * element_index), mask, eviction_policy='evict_last')
-    variance_1 = tl.load(variance_ptr + (1 + 2 * element_index), mask, eviction_policy='evict_last')
+    input0_2x = tl.load(in_ptr0 + (2 * element_index), mask, eviction_policy='evict_last')
+    input1_2x = tl.load(in_ptr1 + (2 * element_offset), mask, eviction_policy='evict_last')
+    input0_2x_plus_1 = tl.load(in_ptr0 + (1 + 2 * element_index), mask, eviction_policy='evict_last')
+    input1_2x_plus_1 = tl.load(in_ptr1 + (1 + 2 * element_offset), mask, eviction_policy='evict_last')
+    in_out_value = tl.load(in_out_ptr0 + (element_index), mask)
+    input2_2x = tl.load(in_ptr2 + (2 * element_index), mask, eviction_policy='evict_last')
+    input2_2x_plus_1 = tl.load(in_ptr2 + (1 + 2 * element_index), mask, eviction_policy='evict_last')
+    input3_value = tl.load(in_ptr3 + (element_index), mask)
 
-    grad_input_data_0 = input_grad_0 * input_data_0
-    grad_input_data_1 = input_grad_1 * input_data_1
-    sum_grad_input_data = grad_input_data_0 + grad_input_data_1
-    scaled_sum_grad_input_data = sum_grad_input_data * in_out_value
-    variance_scaled_input_data_0 = variance_0 * input_data_0
-    variance_scaled_input_data_1 = variance_1 * input_data_1
-    sum_variance_scaled_input_data = variance_scaled_input_data_0 + variance_scaled_input_data_1
-    variance_correction = scaled_sum_grad_input_data - sum_variance_scaled_input_data
-    variance_correction_scaled = variance_correction * mean_value
-    variance_correction_cubed = variance_correction_scaled * variance_correction_scaled * variance_correction_scaled
+    product0 = input0_2x * input1_2x
+    product1 = input0_2x_plus_1 * input1_2x_plus_1
+    sum_products = product0 + product1
+    scaled_sum_products = sum_products * in_out_value
+    product2 = input2_2x * input1_2x
+    product3 = input2_2x_plus_1 * input1_2x_plus_1
+    sum_products2 = product2 + product3
+    difference = scaled_sum_products - sum_products2
+    scaled_difference = difference * input3_value
+    cubed_difference = scaled_difference * scaled_difference * scaled_difference
 
     neg_two = -2.0
     kernel_size0_float = kernel_size0.to(tl.float32)
-    kernel_size0_adjusted = neg_two + kernel_size0_float
+    adjusted_kernel_size0 = neg_two + kernel_size0_float
     power_two = 2.0
-    kernel_size0_power = tl.extra.cuda.libdevice.pow(kernel_size0_adjusted, power_two)
-    kernel_size0_scaled = power_two * kernel_size0_power
+    power_result = tl.extra.cuda.libdevice.pow(adjusted_kernel_size0, power_two)
+    scaled_power_result = power_two * power_result
+
     kernel_size1_float = kernel_size1.to(tl.float32)
-    kernel_size1_adjusted = kernel_size0_scaled * (neg_two + kernel_size1_float)
-    kernel_size1_scaled = kernel_size1_adjusted.to(tl.float64)
+    adjusted_kernel_size1 = neg_two + kernel_size1_float
+    final_scale = scaled_power_result * adjusted_kernel_size1
+    final_scale_double = final_scale.to(tl.float64)
 
-    one = tl.full([1], 1.0, tl.float64)
-    normalization_factor = one / kernel_size1_scaled
-    normalization_factor_float = normalization_factor.to(tl.float32)
+    one_double = tl.full([1], 1.0, tl.float64)
+    reciprocal = one_double / final_scale_double
+    reciprocal_float = reciprocal.to(tl.float32)
 
-    corrected_variance = variance_correction_cubed * normalization_factor_float
-    neg_corrected_variance = -corrected_variance
-    scaled_in_out_value = neg_corrected_variance * in_out_value
-    mean_scaled_sum_grad_input_data = sum_grad_input_data * mean_value
-    mean_scaled_correction = mean_scaled_sum_grad_input_data * normalization_factor_float
-    final_in_out_value = scaled_in_out_value - mean_scaled_correction
+    scaled_cubed_difference = cubed_difference * reciprocal_float
+    neg_scaled_cubed_difference = -scaled_cubed_difference
+    scaled_difference_in_out = neg_scaled_cubed_difference * in_out_value
+    scaled_sum_products_input3 = sum_products * input3_value
+    scaled_input3 = scaled_sum_products_input3 * reciprocal_float
+    final_difference = scaled_difference_in_out - scaled_input3
 
-    tl.store(output_grad_ptr + (element_index), corrected_variance, mask)
-    tl.store(in_out_ptr + (element_index), final_in_out_value, mask)
+    tl.store(out_ptr0 + (element_index), scaled_cubed_difference, mask)
+    tl.store(in_out_ptr0 + (element_index), final_difference, mask)

@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused_add_clamp_mul_sum_7per_fused_add_clamp_mul_sum_7(in_out_ptr0, in_ptr0, in_ptr1, xnumel, rnumel, XBLOCK: tl.constexpr):
+def triton_per_fused_add_clamp_mul_sum_7(in_out_ptr0, in_ptr0, in_ptr1, xnumel, rnumel, XBLOCK: tl.constexpr):
     xnumel = 16
     rnumel = 21
     RBLOCK: tl.constexpr = 32

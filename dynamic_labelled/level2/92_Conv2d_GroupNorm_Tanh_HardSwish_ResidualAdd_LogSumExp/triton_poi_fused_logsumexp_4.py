@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_logsumexp_4poi_fused_logsumexp_4(in_out_ptr0, in_ptr0, num_elements, XBLOCK: tl.constexpr):
+def triton_poi_fused_logsumexp_4(in_out_ptr0, in_ptr0, num_elements, XBLOCK: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     indices = offset + tl.arange(0, XBLOCK)[:]
     mask = indices < num_elements

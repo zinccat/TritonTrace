@@ -7,56 +7,43 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_smooth_l1_loss_0red_fused_smooth_l1_loss_0(
-    input_ptr0, input_ptr1, output_ptr0, kernel_size0, kernel_size1, 
-    input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, 
-    RBLOCK: tl.constexpr
-):
-    input_num_elements = 64
-    input_offset = tl.program_id(0) * XBLOCK
-    input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
-    input_mask = input_index < input_num_elements
-    reduction_base = tl.arange(0, RBLOCK)[None, :]
-    input_0 = input_index
+def triton_red_fused_smooth_l1_loss_0(in_ptr0, in_ptr1, out_ptr0, ks0, ks1, xnumel, rnumel, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+    xnumel = 64
+    x_offset = tl.program_id(0) * XBLOCK
+    x_indices = x_offset + tl.arange(0, XBLOCK)[:, None]
+    x_mask = x_indices < xnumel
+    r_base = tl.arange(0, RBLOCK)[None, :]
+    x0 = x_indices
     temp_sum = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
     
-    for reduction_offset in range(0, reduction_num_elements, RBLOCK):
-        reduction_index = reduction_offset + reduction_base
-        reduction_mask = reduction_index < reduction_num_elements
-        reduction_1 = reduction_index
-        combined_index = reduction_1 + input_0 * ((63 + kernel_size0 * kernel_size1) // 64)
-        kernel_product = kernel_size0 * kernel_size1
-        index_within_bounds = combined_index < kernel_product
+    for r_offset in range(0, rnumel, RBLOCK):
+        r_indices = r_offset + r_base
+        r_mask = r_indices < rnumel
+        r1 = r_indices
+        combined_index = r1 + x0 * ((63 + ks0 * ks1) // 64)
+        max_index = ks0 * ks1
+        valid_index_mask = combined_index < max_index
         
-        input_value0 = tl.load(
-            input_ptr0 + ((combined_index % kernel_product)), 
-            reduction_mask & index_within_bounds & input_mask, 
-            eviction_policy='evict_last', 
-            other=0.0
-        )
-        input_value1 = tl.load(
-            input_ptr1 + ((combined_index % kernel_product)), 
-            reduction_mask & index_within_bounds & input_mask, 
-            eviction_policy='evict_last', 
-            other=0.0
-        )
+        value0 = tl.load(in_ptr0 + ((combined_index % max_index)), r_mask & valid_index_mask & x_mask, eviction_policy='evict_last', other=0.0)
+        value1 = tl.load(in_ptr1 + ((combined_index % max_index)), r_mask & valid_index_mask & x_mask, eviction_policy='evict_last', other=0.0)
         
-        difference = input_value0 - input_value1
-        absolute_difference = tl.math.abs(difference)
+        diff = value0 - value1
+        abs_diff = tl.math.abs(diff)
         threshold = 1.0
-        is_within_threshold = absolute_difference < threshold
-        squared_difference = absolute_difference * absolute_difference
+        below_threshold = abs_diff < threshold
+        
+        squared_diff = abs_diff * abs_diff
         half = 0.5
-        smooth_l1_loss = squared_difference * half * threshold
-        linear_loss = absolute_difference - half
+        smooth_l1 = squared_diff * half * threshold
+        l1 = abs_diff - half
         
-        smooth_l1_result = tl.where(is_within_threshold, smooth_l1_loss, linear_loss)
-        zero_filled = tl.full(smooth_l1_result.shape, 0, smooth_l1_result.dtype)
-        masked_result = tl.where(index_within_bounds, smooth_l1_result, zero_filled)
-        broadcasted_result = tl.broadcast_to(masked_result, [XBLOCK, RBLOCK])
+        smooth_l1_loss = tl.where(below_threshold, smooth_l1, l1)
+        broadcast_loss = tl.full(smooth_l1_loss.shape, 0, smooth_l1_loss.dtype)
+        masked_loss = tl.where(valid_index_mask, smooth_l1_loss, broadcast_loss)
+        expanded_loss = tl.broadcast_to(masked_loss, [XBLOCK, RBLOCK])
         
-        temp_sum += broadcasted_result
-        temp_sum = tl.where(reduction_mask & input_mask, temp_sum, temp_sum)
+        temp_sum += expanded_loss
+        temp_sum = tl.where(r_mask & x_mask, temp_sum, temp_sum)
     
     reduced_sum = tl.sum(temp_sum, 1)[:, None]
-    tl.store(output_ptr0 + (input_0), reduced_sum, input_mask)
+    tl.store(out_ptr0 + (x0), reduced_sum, x_mask)

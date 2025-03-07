@@ -29,17 +29,15 @@ def triton_red_fused_convolution_backward_3(in_ptr0, out_ptr0, kernel_size0, ker
 
         temp_load = tl.load(
             in_ptr0 + (
-                (-2) * (
-                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15))) // (-2 + kernel_size1)) % (-2 + kernel_size1))
-                ) + 4 * input_index_0 + 64 * (
-                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15))) // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)
-                ) + kernel_size1 * (
-                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15))) // (-2 + kernel_size1)) % (-2 + kernel_size1))
-                ) + input_index_0 * kernel_size1 * kernel_size1 + (-64) * kernel_size1 * (
-                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15))) // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)
-                ) + (-4) * kernel_size1 * input_index_0 + 16 * kernel_size1 * kernel_size1 * (
-                    (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15))) // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)
-                ) + (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15))) % (-2 + kernel_size1)))
+                -2 * (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15)) // (-2 + kernel_size1)) % (-2 + kernel_size1))) +
+                4 * input_index_0 +
+                64 * (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15)) // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
+                kernel_size1 * (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15)) // (-2 + kernel_size1)) % (-2 + kernel_size1))) +
+                input_index_0 * kernel_size1 * kernel_size1 +
+                (-64) * kernel_size1 * (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15)) // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
+                (-4) * kernel_size1 * input_index_0 +
+                16 * kernel_size1 * kernel_size1 * (((reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15)) // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
+                (reduction_index_2 + input_index_1 * (triton_helpers.div_floor_integer(14 + 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1, 15)) % (-2 + kernel_size1))
             ),
             reduction_mask & temp_index_2 & input_mask,
             eviction_policy='evict_last',

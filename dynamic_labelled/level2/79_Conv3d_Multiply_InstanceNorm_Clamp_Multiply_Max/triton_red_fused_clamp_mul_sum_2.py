@@ -7,11 +7,11 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_clamp_mul_sum_2red_fused_clamp_mul_sum_2(
+def triton_red_fused_clamp_mul_sum_2(
     input_ptr0, input_ptr1, input_ptr2, input_ptr3, input_ptr4, output_ptr0,
     kernel_size0, kernel_size1, kernel_size2, kernel_size3, x_num_elements, r_num_elements,
-    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
-
+    XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
+):
     x_num_elements = 336
     x_offset = tl.program_id(0) * XBLOCK
     x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
@@ -31,7 +31,8 @@ def triton_red_fused_clamp_mul_sum_2red_fused_clamp_mul_sum_2(
             20 + ((-8) * kernel_size0) + ((-2) * kernel_size0 * kernel_size2 * kernel_size2) +
             4 * kernel_size0 * kernel_size1 + 8 * kernel_size0 * kernel_size2 +
             kernel_size0 * kernel_size1 * kernel_size2 * kernel_size2 +
-            ((-4) * kernel_size0 * kernel_size1 * kernel_size2), 21)
+            ((-4) * kernel_size0 * kernel_size1 * kernel_size2), 21
+        )
 
         tmp0 = r2 + x_div_16 * divisor
         tmp1 = ((-8) * kernel_size0) + ((-2) * kernel_size0 * kernel_size2 * kernel_size2) +
@@ -58,7 +59,8 @@ def triton_red_fused_clamp_mul_sum_2red_fused_clamp_mul_sum_2(
                           ((-4) * kernel_size1 * kernel_size2 * x_mod_16) +
                           16 * kernel_size1 * kernel_size2 * kernel_size2 * (((r2 + x_div_16 * divisor) // kernel_size3) % kernel_size0) +
                           (((r2 + x_div_16 * divisor) % ((-2) + kernel_size2)))), rmask & tmp2 & x_mask,
-            eviction_policy='evict_last', other=0.0)
+            eviction_policy='evict_last', other=0.0
+        )
 
         tmp4 = tl.load(
             input_ptr1 + (((-128) * (((x_mod_16 + 16 * (((r2 + x_div_16 * divisor) // kernel_size3) % kernel_size0)) // 16) % kernel_size0)) +
@@ -78,20 +80,23 @@ def triton_red_fused_clamp_mul_sum_2red_fused_clamp_mul_sum_2(
                           ((-4) * kernel_size1 * kernel_size2 * x_mod_16) +
                           16 * kernel_size1 * kernel_size2 * kernel_size2 * (((x_mod_16 + 16 * (((r2 + x_div_16 * divisor) // kernel_size3) % kernel_size0)) // 16) % kernel_size0) +
                           (((r2 + x_div_16 * divisor) % ((-2) + kernel_size2)))), rmask & tmp2 & x_mask,
-            eviction_policy='evict_last', other=0.0)
+            eviction_policy='evict_last', other=0.0
+        )
 
         tmp5 = tl.load(input_ptr2 + (tl.broadcast_to(x_mod_16, [XBLOCK, RBLOCK])), rmask & tmp2 & x_mask, eviction_policy='evict_last', other=0.0)
         tmp6 = tmp4 * tmp5
 
         tmp7 = tl.load(
-            input_ptr3 + (x_mod_16 + 16 * (((r2 + x_div_16 * divisor) // kernel_size3) % kernel_size0)), rmask & tmp2 & x_mask,
-            eviction_policy='evict_first', other=0.0)
+            input_ptr3 + (x_mod_16 + 16 * (((r2 + x_div_16 * divisor) // kernel_size3) % kernel_size0)),
+            rmask & tmp2 & x_mask, eviction_policy='evict_first', other=0.0
+        )
 
         tmp8 = tmp6 - tmp7
 
         tmp9 = tl.load(
-            input_ptr4 + (x_mod_16 + 16 * (((r2 + x_div_16 * divisor) // kernel_size3) % kernel_size0)), rmask & tmp2 & x_mask,
-            eviction_policy='evict_first', other=0.0)
+            input_ptr4 + (x_mod_16 + 16 * (((r2 + x_div_16 * divisor) // kernel_size3) % kernel_size0)),
+            rmask & tmp2 & x_mask, eviction_policy='evict_first', other=0.0
+        )
 
         tmp10 = tmp8 * tmp9
 
@@ -105,8 +110,8 @@ def triton_red_fused_clamp_mul_sum_2red_fused_clamp_mul_sum_2(
         tmp17 = tl.where(tmp2, tmp15, tmp16)
         tmp18 = tl.broadcast_to(tmp17, [XBLOCK, RBLOCK])
 
-        tmp20 = temp_result + tmp18
-        temp_result = tl.where(rmask & x_mask, tmp20, temp_result)
+        temp_result = temp_result + tmp18
+        temp_result = tl.where(rmask & x_mask, temp_result, temp_result)
 
-    tmp19 = tl.sum(temp_result, 1)[:, None]
-    tl.store(output_ptr0 + (x3), tmp19, x_mask)
+    result_sum = tl.sum(temp_result, 1)[:, None]
+    tl.store(output_ptr0 + (x3), result_sum, x_mask)

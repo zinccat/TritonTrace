@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_div_eq_gelu_gelu_backward_gt_lift_fresh_masked_fill_minimum_mul_where_0poi_fused_add_div_eq_gelu_gelu_backward_gt_lift_fresh_masked_fill_minimum_mul_where_0(
+def triton_poi_fused_add_div_eq_gelu_gelu_backward_gt_lift_fresh_masked_fill_minimum_mul_where_0(
     in_out_ptr0, in_ptr0, xnumel, XBLOCK: tl.constexpr
 ):
     xoffset = tl.program_id(0) * XBLOCK
@@ -17,7 +17,7 @@ def triton_poi_fused_add_div_eq_gelu_gelu_backward_gt_lift_fresh_masked_fill_min
 
     # Load input data
     input_data = tl.load(in_out_ptr0 + (x0), xmask)
-    input_tensor = tl.load(in_ptr0 + (x0), xmask)
+    additional_data = tl.load(in_ptr0 + (x0), xmask)
 
     # Constants
     half = 0.5
@@ -29,30 +29,29 @@ def triton_poi_fused_add_div_eq_gelu_gelu_backward_gt_lift_fresh_masked_fill_min
     neg_half = -0.5
 
     # Operations
-    input_data_plus_half = input_data + half
-    greater_than_zero = input_data_plus_half > zero
-    equal_to_zero = input_data_plus_half == zero
+    input_plus_half = input_data + half
+    is_greater_than_zero = input_plus_half > zero
+    is_equal_to_zero = input_plus_half == zero
 
-    input_tensor_times_two = input_tensor * two
-    min_input_data_zero = triton_helpers.minimum(input_data_plus_half, zero)
-    min_input_data_zero_times_sqrt_half = min_input_data_zero * sqrt_half
+    scaled_additional_data = additional_data * two
+    min_input_zero = triton_helpers.minimum(input_plus_half, zero)
+    scaled_min = min_input_zero * sqrt_half
 
-    erf_result = tl.extra.cuda.libdevice.erf(min_input_data_zero_times_sqrt_half)
-    erf_result_plus_one = erf_result + one
-    erf_result_plus_one_times_half = erf_result_plus_one * half
+    erf_result = tl.extra.cuda.libdevice.erf(scaled_min)
+    erf_plus_one = erf_result + one
+    erf_half = erf_plus_one * half
 
-    min_input_data_zero_squared = min_input_data_zero * min_input_data_zero
-    exp_result = tl.math.exp(min_input_data_zero_squared * neg_half)
-    exp_result_times_erf_coeff = exp_result * erf_coeff
-    exp_result_times_erf_coeff_times_min_input_data_zero = exp_result_times_erf_coeff * min_input_data_zero
+    squared_min = min_input_zero * min_input_zero
+    exp_component = tl.math.exp(squared_min * neg_half)
+    exp_coeff = exp_component * erf_coeff
+    exp_term = min_input_zero * exp_coeff
 
-    gelu_result = erf_result_plus_one_times_half + exp_result_times_erf_coeff_times_min_input_data_zero
-    input_tensor_times_gelu_result = input_tensor_times_two * gelu_result
-    input_tensor_times_gelu_result_times_half = input_tensor_times_gelu_result * half
+    gelu_result = erf_half + exp_term
+    scaled_gelu = scaled_additional_data * gelu_result * half
 
-    # Conditional operations
-    where_equal_to_zero = tl.where(equal_to_zero, input_tensor_times_gelu_result_times_half, input_tensor_times_gelu_result)
-    where_greater_than_zero = tl.where(greater_than_zero, zero, where_equal_to_zero)
+    # Conditional selection
+    where_equal_to_zero = tl.where(is_equal_to_zero, scaled_gelu, scaled_additional_data * gelu_result)
+    where_greater_than_zero = tl.where(is_greater_than_zero, zero, where_equal_to_zero)
 
     # Store result
     tl.store(in_out_ptr0 + (x0), where_greater_than_zero, xmask)

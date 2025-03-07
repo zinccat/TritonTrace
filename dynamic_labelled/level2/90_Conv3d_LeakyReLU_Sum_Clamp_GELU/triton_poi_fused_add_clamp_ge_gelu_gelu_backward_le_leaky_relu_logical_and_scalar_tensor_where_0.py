@@ -28,7 +28,7 @@ def triton_poi_fused_add_clamp_ge_gelu_gelu_backward_le_leaky_relu_logical_and_s
     erf_offset = 1.0
     erf_half = 0.5
     exp_coefficient = -0.5
-    exp_base_coefficient = 0.3989422804014327
+    exp_base = 0.3989422804014327
     
     leaky_relu = tl.where(input_value0 > zero, input_value0, input_value0 * leaky_relu_slope)
     add_result = leaky_relu + input_value1
@@ -39,15 +39,16 @@ def triton_poi_fused_add_clamp_ge_gelu_gelu_backward_le_leaky_relu_logical_and_s
     
     erf_input = clamped_value * erf_coefficient
     erf_result = tl.extra.cuda.libdevice.erf(erf_input)
-    erf_result = erf_result + erf_offset
-    erf_result = erf_result * erf_half
+    erf_adjusted = erf_result + erf_offset
+    gelu_approx = erf_adjusted * erf_half
     
     squared_clamped = clamped_value * clamped_value
-    exp_result = tl.math.exp(squared_clamped * exp_coefficient)
-    exp_result = exp_result * exp_base_coefficient
+    exp_input = squared_clamped * exp_coefficient
+    exp_result = tl.math.exp(exp_input)
+    exp_adjusted = exp_result * exp_base
+    gelu_correction = clamped_value * exp_adjusted
     
-    gelu_result = erf_result + (clamped_value * exp_result)
-    final_result = input_value2 * gelu_result
+    gelu_value = gelu_approx + gelu_correction
+    final_result = tl.where(clamp_condition, input_value2 * gelu_value, zero)
     
-    output_value = tl.where(clamp_condition, final_result, zero)
-    tl.store(output_ptr0 + (x3), output_value, x_mask)
+    tl.store(output_ptr0 + (x3), final_result, x_mask)

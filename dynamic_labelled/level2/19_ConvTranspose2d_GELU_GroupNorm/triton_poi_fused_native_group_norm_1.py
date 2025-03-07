@@ -7,22 +7,20 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_native_group_norm_1poi_fused_native_group_norm_1(
-    input_ptr_mean, input_ptr_var, input_ptr_scale, input_ptr_bias, output_ptr, num_elements, BLOCK_SIZE: tl.constexpr
-):
+def triton_poi_fused_native_group_norm_1(input_ptr_mean, input_ptr_var, input_ptr_inv_std, input_ptr_gamma, input_ptr_beta, output_ptr, num_elements, BLOCK_SIZE : tl.constexpr):
     block_offset = tl.program_id(0) * BLOCK_SIZE
     block_indices = block_offset + tl.arange(0, BLOCK_SIZE)[:]
-    valid_mask = block_indices < num_elements
+    mask = block_indices < num_elements
     linear_index = block_indices
-    group_index = linear_index // 4356
+    batch_index = linear_index // 4356
     channel_index = (linear_index // 4356) % 64
-
-    mean = tl.load(input_ptr_mean + (linear_index), valid_mask)
-    variance = tl.load(input_ptr_var + (group_index // 8), valid_mask, eviction_policy='evict_last')
-    scale = tl.load(input_ptr_scale + (group_index // 8), valid_mask, eviction_policy='evict_last')
-    bias = tl.load(input_ptr_bias + (channel_index), valid_mask, eviction_policy='evict_last')
-    output_bias = tl.load(input_ptr_bias + (channel_index), valid_mask, eviction_policy='evict_last')
-
+    
+    mean = tl.load(input_ptr_mean + (linear_index), mask)
+    var = tl.load(input_ptr_var + (batch_index // 8), mask, eviction_policy='evict_last')
+    inv_std = tl.load(input_ptr_inv_std + (batch_index // 8), mask, eviction_policy='evict_last')
+    gamma = tl.load(input_ptr_gamma + (channel_index), mask, eviction_policy='evict_last')
+    beta = tl.load(input_ptr_beta + (channel_index), mask, eviction_policy='evict_last')
+    
     half = 0.5
     scaled_mean = mean * half
     sqrt_inv_two = 0.7071067811865476
@@ -31,15 +29,15 @@ def triton_poi_fused_native_group_norm_1poi_fused_native_group_norm_1(
     one = 1.0
     erf_adjusted = erf_result + one
     gelu_output = scaled_mean * erf_adjusted
-    normalized_output = gelu_output - variance
-
-    variance_scale = 34848.0
-    variance_adjusted = variance / variance_scale
+    centered_output = gelu_output - var
+    
+    eps = 34848.0
+    var_adjusted = var / eps
     epsilon = 1e-05
-    variance_with_epsilon = variance_adjusted + epsilon
-    inv_sqrt_variance = tl.extra.cuda.libdevice.rsqrt(variance_with_epsilon)
-    normalized_scaled_output = normalized_output * inv_sqrt_variance
-    scaled_output = normalized_scaled_output * scale
-    final_output = scaled_output + bias
-
-    tl.store(output_ptr + (linear_index), final_output, valid_mask)
+    var_with_epsilon = var_adjusted + epsilon
+    inv_std_adjusted = tl.extra.cuda.libdevice.rsqrt(var_with_epsilon)
+    normalized_output = centered_output * inv_std_adjusted
+    scaled_output = normalized_output * gamma
+    final_output = scaled_output + beta
+    
+    tl.store(output_ptr + (linear_index), final_output, mask)

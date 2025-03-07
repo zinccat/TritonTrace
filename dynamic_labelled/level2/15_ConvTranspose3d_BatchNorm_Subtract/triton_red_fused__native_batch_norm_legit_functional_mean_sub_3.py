@@ -8,9 +8,9 @@ triton_helpers.set_driver_to_gpu()
 
 @triton.jit
 def triton_red_fused__native_batch_norm_legit_functional_mean_sub_3(
-    in_out_ptr, mean_ptr, variance_ptr, gamma_ptr, beta_ptr, kernel_size, 
-    x_num_elements, r_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr
-):
+    output_ptr, input_ptr, mean_ptr, variance_ptr, gamma_ptr, beta_ptr, kernel_size, 
+    x_num_elements, r_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+
     x_num_elements = 512
     x_offset = tl.program_id(0) * XBLOCK
     x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
@@ -24,20 +24,20 @@ def triton_red_fused__native_batch_norm_legit_functional_mean_sub_3(
     gamma = tl.load(gamma_ptr + (x0), x_mask, eviction_policy='evict_last')
     beta = tl.load(beta_ptr + (x0), x_mask, eviction_policy='evict_last')
     
-    accumulated_result = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
+    accumulated_output = tl.full([XBLOCK, RBLOCK], 0, tl.float32)
     
     for r_offset in range(0, r_num_elements, RBLOCK):
         r_index = r_offset + r_base
         r_mask = r_index < r_num_elements
         r2 = r_index
         input_value = tl.load(
-            in_out_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
+            input_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
             r_mask & x_mask, 
             eviction_policy='evict_first', 
             other=0.0
         )
         
-        normalized_value = input_value - mean
+        normalized_input = input_value - mean
         variance_adjustment = 496 + ((-1984) * kernel_size) + 1984 * kernel_size * kernel_size
         variance_adjustment_float = variance_adjustment.to(tl.float32)
         variance_scaled = variance / variance_adjustment_float
@@ -45,27 +45,28 @@ def triton_red_fused__native_batch_norm_legit_functional_mean_sub_3(
         variance_stabilized = variance_scaled + epsilon
         rsqrt_variance = tl.extra.cuda.libdevice.rsqrt(variance_stabilized)
         
-        scaled_normalized_value = normalized_value * rsqrt_variance
-        scaled_value = scaled_normalized_value * gamma
-        adjusted_value = scaled_value + beta
+        normalized_scaled = normalized_input * rsqrt_variance
+        scaled_output = normalized_scaled * gamma
+        output_with_bias = scaled_output + beta
         
-        broadcast_adjusted_value = tl.broadcast_to(adjusted_value, [XBLOCK, RBLOCK])
-        accumulated_result = accumulated_result + broadcast_adjusted_value
+        broadcast_output = tl.broadcast_to(output_with_bias, [XBLOCK, RBLOCK])
+        accumulated_output = accumulated_output + broadcast_output
+        accumulated_output = tl.where(r_mask & x_mask, accumulated_output, accumulated_output)
         
         tl.store(
-            in_out_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
-            adjusted_value, 
+            output_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
+            output_with_bias, 
             r_mask & x_mask
         )
     
-    sum_accumulated_result = tl.sum(accumulated_result, 1)[:, None]
+    mean_accumulated = tl.sum(accumulated_output, 1)[:, None]
     
     for r_offset in range(0, r_num_elements, RBLOCK):
         r_index = r_offset + r_base
         r_mask = r_index < r_num_elements
         r2 = r_index
-        stored_value = tl.load(
-            in_out_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
+        stored_output = tl.load(
+            output_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
             r_mask & x_mask, 
             eviction_policy='evict_first', 
             other=0.0
@@ -73,12 +74,11 @@ def triton_red_fused__native_batch_norm_legit_functional_mean_sub_3(
         
         mean_adjustment = 31 + ((-124) * kernel_size) + 124 * kernel_size * kernel_size
         mean_adjustment_float = mean_adjustment.to(tl.float32)
-        mean_correction = sum_accumulated_result / mean_adjustment_float
-        
-        corrected_value = stored_value - mean_correction
+        mean_correction = mean_accumulated / mean_adjustment_float
+        corrected_output = stored_output - mean_correction
         
         tl.store(
-            in_out_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
-            corrected_value, 
+            output_ptr + (r2 + 31 * x3 + ((-124) * kernel_size * x3) + 124 * x3 * kernel_size * kernel_size), 
+            corrected_output, 
             r_mask & x_mask
         )

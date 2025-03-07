@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_red_fused_mul_sum_1red_fused_mul_sum_1(in_ptr0, out_ptr0, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+def triton_red_fused_mul_sum_1(in_ptr0, out_ptr0, kernel_size0, kernel_size1, input_num_elements, reduction_num_elements, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
     input_num_elements = 240
     input_offset = tl.program_id(0) * XBLOCK
     input_index = input_offset + tl.arange(0, XBLOCK)[:, None]
@@ -27,30 +27,27 @@ def triton_red_fused_mul_sum_1red_fused_mul_sum_1(in_ptr0, out_ptr0, kernel_size
         temp_index_limit = 4 * kernel_size0 + kernel_size0 * kernel_size1 * kernel_size1 + (-4) * kernel_size0 * kernel_size1
         index_within_bounds = temp_index < temp_index_limit
 
-        temp_load = tl.load(
-            in_ptr0 + (
-                -2 * (((temp_index // (-2 + kernel_size1)) % (-2 + kernel_size1))) +
-                4 * input_index_mod_16 +
-                64 * (((temp_index // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
-                kernel_size1 * (((temp_index // (-2 + kernel_size1)) % (-2 + kernel_size1))) +
-                input_index_mod_16 * kernel_size1 * kernel_size1 +
-                (-64) * kernel_size1 * (((temp_index // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
-                (-4) * kernel_size1 * input_index_mod_16 +
-                16 * kernel_size1 * kernel_size1 * (((temp_index // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
-                (temp_index % (-2 + kernel_size1))
-            ),
-            reduction_mask & index_within_bounds & input_mask,
-            eviction_policy='evict_last',
-            other=0.0
+        load_index = (
+            -2 * (((temp_index // (-2 + kernel_size1)) % (-2 + kernel_size1))) +
+            4 * input_index_mod_16 +
+            64 * (((temp_index // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
+            kernel_size1 * (((temp_index // (-2 + kernel_size1)) % (-2 + kernel_size1))) +
+            input_index_mod_16 * kernel_size1 * kernel_size1 +
+            (-64) * kernel_size1 * (((temp_index // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
+            (-4) * kernel_size1 * input_index_mod_16 +
+            16 * kernel_size1 * kernel_size1 * (((temp_index // (4 + kernel_size1 * kernel_size1 + (-4) * kernel_size1)) % kernel_size0)) +
+            (temp_index % (-2 + kernel_size1))
         )
 
-        scale_factor = 2.0
-        scaled_load = temp_load * scale_factor
-        zero_filled = tl.full(scaled_load.shape, 0, scaled_load.dtype)
-        conditional_load = tl.where(index_within_bounds, scaled_load, zero_filled)
-        broadcasted_load = tl.broadcast_to(conditional_load, [XBLOCK, RBLOCK])
-        temp_result_update = temp_result + broadcasted_load
-        temp_result = tl.where(reduction_mask & input_mask, temp_result_update, temp_result)
+        loaded_values = tl.load(in_ptr0 + load_index, reduction_mask & index_within_bounds & input_mask, eviction_policy='evict_last', other=0.0)
+        multiplier = 2.0
+        multiplied_values = loaded_values * multiplier
+        zero_filled_values = tl.full(multiplied_values.shape, 0, multiplied_values.dtype)
+        selected_values = tl.where(index_within_bounds, multiplied_values, zero_filled_values)
+        broadcasted_values = tl.broadcast_to(selected_values, [XBLOCK, RBLOCK])
+        temp_result += broadcasted_values
+
+        temp_result = tl.where(reduction_mask & input_mask, temp_result, temp_result)
 
     summed_result = tl.sum(temp_result, 1)[:, None]
     tl.store(out_ptr0 + (input_index_3), summed_result, input_mask)

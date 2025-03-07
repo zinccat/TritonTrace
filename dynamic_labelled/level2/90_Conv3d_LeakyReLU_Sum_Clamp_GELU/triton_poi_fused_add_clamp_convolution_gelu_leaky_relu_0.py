@@ -7,7 +7,7 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_add_clamp_convolution_gelu_leaky_relu_0poi_fused_add_clamp_convolution_gelu_leaky_relu_0(
+def triton_poi_fused_add_clamp_convolution_gelu_leaky_relu_0(
     in_out_ptr0, in_ptr0, in_ptr1, out_ptr0, kernel_size, num_elements, XBLOCK: tl.constexpr
 ):
     x_offset = tl.program_id(0) * XBLOCK
@@ -16,32 +16,37 @@ def triton_poi_fused_add_clamp_convolution_gelu_leaky_relu_0poi_fused_add_clamp_
     x3 = x_index
     x1 = ((x_index // kernel_size) % 16)
     
-    input_output_value = tl.load(in_out_ptr0 + (x3), x_mask, eviction_policy='evict_last')
-    input_value_0 = tl.load(in_ptr0 + (x1), x_mask, eviction_policy='evict_last')
-    input_value_1 = tl.load(in_ptr1 + (x1), x_mask, eviction_policy='evict_last')
+    # Load data with eviction policy
+    input_output_data = tl.load(in_out_ptr0 + (x3), x_mask, eviction_policy='evict_last')
+    input_data_0 = tl.load(in_ptr0 + (x1), x_mask, eviction_policy='evict_last')
+    input_data_1 = tl.load(in_ptr1 + (x1), x_mask, eviction_policy='evict_last')
     
-    added_value = input_output_value + input_value_0
+    # Perform addition
+    added_data = input_output_data + input_data_0
+    
+    # Leaky ReLU
     zero = 0.0
-    is_positive = added_value > zero
     leaky_relu_slope = 0.2
-    leaky_relu_value = added_value * leaky_relu_slope
-    leaky_relu_result = tl.where(is_positive, added_value, leaky_relu_value)
+    is_positive = added_data > zero
+    leaky_relu_output = tl.where(is_positive, added_data, added_data * leaky_relu_slope)
     
-    sum_result = leaky_relu_result + input_value_1
+    # Sum with second input
+    sum_output = leaky_relu_output + input_data_1
+    
+    # Clamp operation
     clamp_min = -1.0
     clamp_max = 1.0
+    clamped_output = triton_helpers.maximum(sum_output, clamp_min)
+    clamped_output = triton_helpers.minimum(clamped_output, clamp_max)
     
-    clamped_value = triton_helpers.maximum(sum_result, clamp_min)
-    clamped_value = triton_helpers.minimum(clamped_value, clamp_max)
-    
+    # GELU approximation
     gelu_coefficient = 0.5
-    gelu_coefficient_sqrt2 = 0.7071067811865476
+    gelu_sqrt_coefficient = 0.7071067811865476
+    gelu_clamped = clamped_output * gelu_coefficient
+    gelu_erf_input = clamped_output * gelu_sqrt_coefficient
+    erf_result = tl.extra.cuda.libdevice.erf(gelu_erf_input)
+    gelu_output = gelu_clamped * (erf_result + clamp_max)
     
-    scaled_clamped_value = clamped_value * gelu_coefficient
-    scaled_sqrt2_clamped_value = clamped_value * gelu_coefficient_sqrt2
-    
-    erf_result = tl.extra.cuda.libdevice.erf(scaled_sqrt2_clamped_value)
-    gelu_result = scaled_clamped_value * (erf_result + clamp_max)
-    
-    tl.store(in_out_ptr0 + (x3), added_value, x_mask)
-    tl.store(out_ptr0 + (x3), gelu_result, x_mask)
+    # Store results
+    tl.store(in_out_ptr0 + (x3), added_data, x_mask)
+    tl.store(out_ptr0 + (x3), gelu_output, x_mask)

@@ -24,10 +24,10 @@ def triton_red_fused_convolution_backward_2(in_ptr0, out_ptr0, kernel_size0, ker
         reduction_index_2 = reduction_index
         temp_index0 = reduction_index_2 + input_index_1 * ((7 + 4 * kernel_size0 * kernel_size1) // 8)
         temp_index1 = 4 * kernel_size0 * kernel_size1
-        temp_mask = temp_index0 < temp_index1
+        temp_mask2 = temp_index0 < temp_index1
         temp_load = tl.load(
             in_ptr0 + (4 * kernel_size0 * input_index_0 + 256 * kernel_size0 * (((temp_index0 // kernel_size2) % kernel_size1)) + (temp_index0 % kernel_size2)),
-            reduction_mask & temp_mask & input_mask,
+            reduction_mask & temp_mask2 & input_mask,
             eviction_policy='evict_last',
             other=0.0
         )

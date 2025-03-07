@@ -19,58 +19,56 @@ def triton_red_fused__native_batch_norm_legit_functional_0(
     input_mask = input_index < input_num_elements
     reduction_base = tl.arange(0, RBLOCK)[None, :]
     input_index_0 = input_index
-    temp_mean = tl.zeros([XBLOCK, RBLOCK], tl.float32)
-    temp_m2 = tl.zeros([XBLOCK, RBLOCK], tl.float32)
-    temp_weight = tl.zeros([XBLOCK, RBLOCK], tl.float32)
+    running_mean = tl.zeros([XBLOCK, RBLOCK], tl.float32)
+    running_m2 = tl.zeros([XBLOCK, RBLOCK], tl.float32)
+    running_weight = tl.zeros([XBLOCK, RBLOCK], tl.float32)
     
     for reduction_offset in range(0, reduction_num_elements, RBLOCK):
         reduction_index = reduction_offset + reduction_base
         reduction_mask = reduction_index < reduction_num_elements
         reduction_index_1 = reduction_index
-        temp_input = tl.load(input_ptr_mean + (input_index_0 + 512 * reduction_index_1), 
+        input_data = tl.load(input_ptr_mean + (input_index_0 + 512 * reduction_index_1), 
                              reduction_mask & input_mask, 
                              eviction_policy='evict_first', 
                              other=0.0)
-        temp_broadcast = tl.broadcast_to(temp_input, [XBLOCK, RBLOCK])
-        temp_mean_next, temp_m2_next, temp_weight_next = triton_helpers.welford_reduce(
-            temp_broadcast, temp_mean, temp_m2, temp_weight, reduction_offset == 0
+        broadcasted_input = tl.broadcast_to(input_data, [XBLOCK, RBLOCK])
+        running_mean_next, running_m2_next, running_weight_next = triton_helpers.welford_reduce(
+            broadcasted_input, running_mean, running_m2, running_weight, reduction_offset == 0
         )
-        temp_mean = tl.where(reduction_mask & input_mask, temp_mean_next, temp_mean)
-        temp_m2 = tl.where(reduction_mask & input_mask, temp_m2_next, temp_m2)
-        temp_weight = tl.where(reduction_mask & input_mask, temp_weight_next, temp_weight)
+        running_mean = tl.where(reduction_mask & input_mask, running_mean_next, running_mean)
+        running_m2 = tl.where(reduction_mask & input_mask, running_m2_next, running_m2)
+        running_weight = tl.where(reduction_mask & input_mask, running_weight_next, running_weight)
     
-    temp_mean_final, temp_var_final, temp_weight_final = triton_helpers.welford(
-        temp_mean, temp_m2, temp_weight, 1
-    )
-    temp_mean_final = temp_mean_final[:, None]
-    temp_var_final = temp_var_final[:, None]
-    temp_weight_final = temp_weight_final[:, None]
+    mean, variance, weight = triton_helpers.welford(running_mean, running_m2, running_weight, 1)
+    mean = mean[:, None]
+    variance = variance[:, None]
+    weight = weight[:, None]
     
-    tl.store(output_ptr_normalized + (input_index_0), temp_mean_final, input_mask)
+    tl.store(output_ptr_normalized + (input_index_0), mean, input_mask)
     
-    temp_scale = tl.load(input_ptr_var + (input_index_0), input_mask, eviction_policy='evict_last')
-    temp_bias = tl.load(input_ptr_bias + (input_index_0), input_mask, eviction_policy='evict_last')
+    input_scale = tl.load(input_ptr_var + (input_index_0), input_mask, eviction_policy='evict_last')
+    input_offset_data = tl.load(input_ptr_bias + (input_index_0), input_mask, eviction_policy='evict_last')
     
     kernel_size_float = kernel_size.to(tl.float32)
-    temp_var_div = temp_var_final / kernel_size_float
+    normalized_variance = variance / kernel_size_float
     epsilon = 1e-05
-    temp_var_add_epsilon = temp_var_div + epsilon
-    temp_var_rsqrt = tl.extra.cuda.libdevice.rsqrt(temp_var_add_epsilon)
+    variance_with_epsilon = normalized_variance + epsilon
+    rsqrt_variance = tl.extra.cuda.libdevice.rsqrt(variance_with_epsilon)
     
-    temp_var_scale_factor = (((512 * kernel_size) / 512) / 
-                             ((tl.full([], -1.00000000000000, tl.float64)) + 
-                              ((512 * kernel_size) / 512))).to(tl.float32)
-    temp_var_scaled = temp_var_div * temp_var_scale_factor
+    scale_factor = (((512 * kernel_size) / 512) / ((tl.full([], -1.00000000000000, tl.float64)) + ((512 * kernel_size) / 512)))
+    scale_factor_float = scale_factor.to(tl.float32)
+    normalized_variance_scaled = normalized_variance * scale_factor_float
     swish_beta = 0.1
-    temp_var_swish = temp_var_scaled * swish_beta
+    swish_scale = normalized_variance_scaled * swish_beta
     
     momentum = 0.9
-    temp_scale_momentum = temp_scale * momentum
-    temp_scale_swish = temp_var_swish + temp_scale_momentum
+    scaled_input_scale = input_scale * momentum
+    swish_offset = swish_scale + scaled_input_scale
     
-    temp_bias_momentum = temp_bias * momentum
-    temp_bias_swish = temp_mean_final * swish_beta + temp_bias_momentum
+    swish_weight = mean * swish_beta
+    scaled_input_offset = input_offset_data * momentum
+    swish_bias = swish_weight + scaled_input_offset
     
-    tl.store(output_ptr_scale + (input_index_0), temp_var_rsqrt, input_mask)
-    tl.store(output_ptr_normalized + (input_index_0), temp_scale_swish, input_mask)
-    tl.store(output_ptr_offset + (input_index_0), temp_bias_swish, input_mask)
+    tl.store(output_ptr_scale + (input_index_0), rsqrt_variance, input_mask)
+    tl.store(output_ptr_normalized + (input_index_0), swish_offset, input_mask)
+    tl.store(output_ptr_offset + (input_index_0), swish_bias, input_mask)

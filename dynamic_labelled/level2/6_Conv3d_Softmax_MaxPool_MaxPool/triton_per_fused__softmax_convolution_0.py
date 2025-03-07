@@ -7,45 +7,45 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_per_fused__softmax_convolution_0(
-    in_ptr0, in_ptr1, out_ptr0, out_ptr1, kernel_size0, kernel_size1, kernel_size2, 
-    xnumel, rnumel, XBLOCK: tl.constexpr
-):
+def triton_per_fused__softmax_convolution_0(in_ptr0, in_ptr1, out_ptr0, out_ptr1, ks0, ks1, ks2, xnumel, rnumel, XBLOCK: tl.constexpr):
     RBLOCK: tl.constexpr = 16
-    x_offset = tl.program_id(0) * XBLOCK
-    x_index = x_offset + tl.arange(0, XBLOCK)[:, None]
-    x_mask = x_index < xnumel
-    r_index = tl.arange(0, RBLOCK)[None, :]
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:, None]
+    xmask = xindex < xnumel
+    rindex = tl.arange(0, RBLOCK)[None, :]
     tl.full([XBLOCK, RBLOCK], True, tl.int1)
-    r2 = r_index
-    x3 = (x_index % kernel_size0)
-    x4 = x_index // kernel_size0
-    x5 = x_index
-    tmp0 = tl.load(
-        in_ptr0 + (
-            x3 + ((-128) * x4) + ((-8) * r2) + 
-            ((-32) * x4 * kernel_size2 * kernel_size2) + 
-            ((-2) * r2 * kernel_size2 * kernel_size2) + 
-            4 * kernel_size1 * r2 + 8 * kernel_size2 * r2 + 
-            64 * kernel_size1 * x4 + 128 * kernel_size2 * x4 + 
-            kernel_size1 * r2 * kernel_size2 * kernel_size2 + 
-            ((-64) * kernel_size1 * kernel_size2 * x4) + 
-            ((-4) * kernel_size1 * kernel_size2 * r2) + 
-            16 * kernel_size1 * x4 * kernel_size2 * kernel_size2
-        ), 
-        x_mask, 
-        eviction_policy='evict_last', 
-        other=0.0
+    row_index = rindex
+    col_index_mod_ks0 = xindex % ks0
+    col_index_div_ks0 = xindex // ks0
+    linear_index = xindex
+
+    input_offset = (
+        col_index_mod_ks0 +
+        ((-128) * col_index_div_ks0) +
+        ((-8) * row_index) +
+        ((-32) * col_index_div_ks0 * ks2 * ks2) +
+        ((-2) * row_index * ks2 * ks2) +
+        4 * ks1 * row_index +
+        8 * ks2 * row_index +
+        64 * ks1 * col_index_div_ks0 +
+        128 * ks2 * col_index_div_ks0 +
+        ks1 * row_index * ks2 * ks2 +
+        ((-64) * ks1 * ks2 * col_index_div_ks0) +
+        ((-4) * ks1 * ks2 * row_index) +
+        16 * ks1 * col_index_div_ks0 * ks2 * ks2
     )
-    tmp1 = tl.load(in_ptr1 + (r2), None, eviction_policy='evict_last')
+
+    tmp0 = tl.load(in_ptr0 + input_offset, xmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(in_ptr1 + (row_index), None, eviction_policy='evict_last')
     tmp2 = tmp0 + tmp1
     tmp3 = tl.broadcast_to(tmp2, [XBLOCK, RBLOCK])
-    tmp5 = tl.where(x_mask, tmp3, float("-inf"))
-    tmp6 = triton_helpers.max2(tmp5, 1)[:, None]
-    tmp7 = tmp2 - tmp6
-    tmp8 = tl.math.exp(tmp7)
-    tmp9 = tl.broadcast_to(tmp8, [XBLOCK, RBLOCK])
-    tmp11 = tl.where(x_mask, tmp9, 0)
-    tmp12 = tl.sum(tmp11, 1)[:, None]
-    tl.store(out_ptr0 + (x5), tmp6, x_mask)
-    tl.store(out_ptr1 + (x5), tmp12, x_mask)
+    tmp5 = tl.where(xmask, tmp3, float("-inf"))
+    max_values = triton_helpers.max2(tmp5, 1)[:, None]
+    tmp7 = tmp2 - max_values
+    exp_values = tl.math.exp(tmp7)
+    tmp9 = tl.broadcast_to(exp_values, [XBLOCK, RBLOCK])
+    masked_exp_values = tl.where(xmask, tmp9, 0)
+    sum_exp_values = tl.sum(masked_exp_values, 1)[:, None]
+
+    tl.store(out_ptr0 + (linear_index), max_values, xmask)
+    tl.store(out_ptr1 + (linear_index), sum_exp_values, xmask)

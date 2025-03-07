@@ -7,34 +7,34 @@ from torch._inductor.runtime import triton_helpers
 triton_helpers.set_driver_to_gpu()
 
 @triton.jit
-def triton_poi_fused_scatter_tanh_backward_zeros_1poi_fused_scatter_tanh_backward_zeros_1(
-    input_ptr0, input_ptr1, input_ptr2, input_ptr3, output_ptr0, kernel_size0, kernel_size1, num_elements, XBLOCK: tl.constexpr
+def triton_poi_fused_scatter_tanh_backward_zeros_1(
+    input_grad_ptr, input_data_ptr, input_tanh_ptr, input_mask_ptr, output_grad_ptr, kernel_size_0, kernel_size_1, num_elements, XBLOCK: tl.constexpr
 ):
     offset = tl.program_id(0) * XBLOCK
     index = offset + tl.arange(0, XBLOCK)[:]
     mask = index < num_elements
     linear_index = index
-    kernel_index_x = index % kernel_size0
-    kernel_index_y = index // kernel_size0
+    kernel_index_0 = index % kernel_size_0
+    kernel_index_1 = index // kernel_size_0
 
-    input_value0 = tl.load(input_ptr0 + (linear_index), mask, eviction_policy='evict_last')
-    input_value1 = tl.load(input_ptr1 + (linear_index), mask, eviction_policy='evict_last')
-    input_value2 = tl.load(input_ptr2 + (linear_index), mask, eviction_policy='evict_last')
-    input_value3 = tl.load(input_ptr3 + (linear_index), mask, eviction_policy='evict_last')
+    grad_input = tl.load(input_grad_ptr + (linear_index), mask, eviction_policy='evict_last')
+    data_input = tl.load(input_data_ptr + (linear_index), mask, eviction_policy='evict_last')
+    tanh_input = tl.load(input_tanh_ptr + (linear_index), mask, eviction_policy='evict_last')
+    mask_input = tl.load(input_mask_ptr + (linear_index), mask, eviction_policy='evict_last')
 
-    tl.device_assert(((0 <= input_value0) & (input_value0 < 16)) | ~mask, "index out of bounds: 0 <= input_value0 < 16")
+    tl.device_assert(((0 <= grad_input) & (grad_input < 16)) | ~mask, "index out of bounds: 0 <= grad_input < 16")
 
-    squared_value2 = input_value2 * input_value2
-    one_minus_squared_value2 = 1.0 - squared_value2
-    scaled_value1 = input_value1 * one_minus_squared_value2
-    result = scaled_value1 * input_value3
+    tanh_squared = tanh_input * tanh_input
+    one_minus_tanh_squared = 1.0 - tanh_squared
+    grad_tanh = data_input * one_minus_tanh_squared
+    grad_output = grad_tanh * mask_input
 
     output_index = (
-        kernel_index_x + 4 * input_value0 + 64 * kernel_index_y +
-        input_value0 * kernel_size1 * kernel_size1 +
-        (-64) * kernel_size1 * kernel_index_y +
-        (-4) * kernel_size1 * input_value0 +
-        16 * kernel_index_y * kernel_size1 * kernel_size1
+        kernel_index_0 + 4 * grad_input + 64 * kernel_index_1 +
+        grad_input * kernel_size_1 * kernel_size_1 +
+        (-64) * kernel_size_1 * kernel_index_1 +
+        (-4) * kernel_size_1 * grad_input +
+        16 * kernel_index_1 * kernel_size_1 * kernel_size_1
     )
 
-    tl.store(output_ptr0 + output_index, result, mask)
+    tl.store(output_grad_ptr + (output_index), grad_output, mask)
